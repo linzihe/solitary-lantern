@@ -2,6 +2,9 @@
 
 一本能玩的《威卡：独修者指南》。单文件像素风网页游戏，双击就能玩，不联网、不装东西、不含任何素材文件。
 
+**线上试玩：<https://linzihe.github.io/solitary-lantern/>**
+手机 / 平板用浏览器打开这个网址、横过来就能玩，不需要下载任何东西。
+
 ## 开始游戏
 
 双击根目录 `index.html` 或 `dist/index.html`（两者内容一致）即可离线游玩。
@@ -160,6 +163,20 @@ music/trance.mp3   music/wheel.mp3    music/trial.mp3    music/ending.mp3 music/
 - 西文与数字：Fusion Pixel Font（SIL OFL 1.1，见 `fonts/OFL.txt`），同样子集内联。
 - 画面：`art/*.png` 是像素背景与立绘，构建时 base64 内联，游戏运行时不再引用任何外部文件。
 - 配乐与音效：全部由 `src/audio.js` 实时合成，没有音频文件。
+  若把 Suno 等工具生成的曲子放进 `music/`（如 `music/title.mp3`），游戏会优先播放真实文件，
+  并自动做首尾交叉叠化循环；没有文件时回落到合成曲。
+
+## 部署到 GitHub Pages
+
+```powershell
+$env:GITHUB_TOKEN = "ghp_..."     # classic token，勾 repo 权限
+node tools/deploy-github.mjs      # 建仓 + 上传 + 开 Pages + 轮询到可访问
+```
+
+脚本走 GitHub REST API（Git Data API 建 blob/tree/commit），**不需要本地装 git**。
+`node tools/deploy-github.mjs --dry` 只列出待上传文件，不联网。
+部署后用 `PORT=9360 node tools/cdp-live.mjs` 可以在无头浏览器里直接打开线上地址，
+验证游戏能启动、能推进剧情、能读到 `music/` 里的配乐文件。
 
 ## 参考与改编
 

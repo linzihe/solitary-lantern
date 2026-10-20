@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>live-check</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.5 Consolas,monospace;margin:0;padding:8px}pre{margin:0;white-space:pre-wrap}.ok{color:#7fd18a}</style>
+</head>
+<body>
+<pre id="log">live-check…</pre>
+<iframe id="f" style="width:960px;height:540px;border:1px solid #333"></iframe>
+<script>
+/* 直接加载**线上地址**，验证游戏真的能启动、能玩、配乐文件能读到。
+   这是部署后最关键的验证：HTTP 200 不等于游戏能跑。 */
+var URL_LIVE = 'https://linzihe.github.io/solitary-lantern/';
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var fr = document.getElementById('f');
+fr.src = URL_LIVE;
+var t0 = Date.now(), started = false;
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (ok && !started) {
+    started = true;
+    var G = w.Game.G;
+    say('✓ 游戏已启动（__booted）  用时 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒');
+    say('  场景数：' + Object.keys(w.STORY.scenes).length);
+    say('  章节数：' + w.STORY.chapters.length);
+    say('  图鉴条数：' + Object.keys(w.STORY.codex || {}).length);
+    say('  画布：' + w.document.getElementById('screen').width + 'x' +
+        w.document.getElementById('screen').height);
+    say('  构建标记：' + (typeof w.__BUILD__ !== 'undefined' ? w.__BUILD__ : '(无)'));
+    // 配乐探测：线上能不能拿到 music/title.mp3
+    setTimeout(function () {
+      try {
+        var M = w.Music;
+        if (M && M.detect) {
+          M.detect().then(function (found) {
+            var names = Object.keys(found || {});
+            say('  配乐探测：' + (names.length ? names.map(function (n) { return n + '.' + found[n]; }).join(', ') : '（没找到）'));
+            finish(w);
+          }, function (e) { say('  配乐探测失败：' + e.message); finish(w); });
+        } else { say('  配乐模块不存在'); finish(w); }
+      } catch (e) { say('  配乐异常：' + e.message); finish(w); }
+    }, 800);
+    return;
+  }
+  if (Date.now() - t0 > 45000) {
+    say('✗ 45 秒内游戏没启动（首次 Pages 发布可能还没生效）');
+    document.title = 'FAIL'; window.__autoDone = true; return;
+  }
+  setTimeout(poll, 150);
+})();
+
+function finish(w) {
+  /* 真正玩几步：轻触标题开始 + 推进对话 */
+  try {
+    w.Game.newGame();
+    for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+    var G = w.Game.G;
+    var steps = 0;
+    function key(k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+    for (var n = 0; n < 400 && steps < 6; n++) {
+      if (G.dlg) { G.dlg.shown = G.dlg.text.length; key('Enter'); steps++; }
+      else if (G.mode === 'page') key('Enter');
+      w.Game.__step(1 / 60);
+    }
+    say('✓ 线上能正常推进剧情：mode=' + G.mode + ' pc=' + G.pc + ' 已推进 ' + steps + ' 句');
+    say('  当前背景：' + G.bg + '   音乐：' + G.bgm);
+  } catch (e) { say('✗ 推进失败：' + e.message); }
+  say('');
+  say('===== 通过 =====');
+  document.title = 'PASS';
+  window.__autoDone = true;
+}
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>
