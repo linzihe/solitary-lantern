@@ -1,0 +1,46 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>music-chain</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.6 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}.ok{color:#7fd18a}.bad{color:#ff7b7b}</style>
+</head>
+<body>
+<pre id="log">running…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:900px;height:520px;border:1px solid #333"></iframe>
+<script>
+/* 查"起播 → 被自动播放策略挡住 → 用户手势后恢复"这条链。
+   顺带读 <audio> 元素的实际状态，确认文件真的被加载了（readyState/网络状态）。 */
+var log = document.getElementById('log');
+function say(s) { log.textContent += '\n' + s; }
+var iframe = document.getElementById('f');
+var n = 0;
+(function poll() {
+  n++;
+  var w = null; try { w = iframe.contentWindow; } catch (e) {}
+  if (w && w.__booted) {
+    var M = w.Music;
+    if (!M) { say('没有 Music 模块'); done(); return; }
+    setTimeout(function () {
+      say('debug(): ' + JSON.stringify(M.debug(), null, 1));
+      say('Music.current() = ' + M.current());
+      say('（headless 下 play() 常被自动播放策略拒绝，所以 paused=true / 时间不走是正常的；');
+      say('  关键看 readyState 与 duration —— 那说明文件确实加载到了。）');
+      /* 模拟一次用户手势：真实浏览器里这就是"玩家按了一下键" */
+      w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      setTimeout(function () {
+        var els2 = w.document.querySelectorAll('audio');
+        say('手势之后：paused=' + (els2[0] ? els2[0].paused : 'n/a') + ' currentTime=' + M.currentTime().toFixed(2) + 's');
+        done();
+      }, 800);
+    }, 1500);
+    return;
+  }
+  if (n > 500) { say('游戏没启动'); done(); return; }
+  setTimeout(poll, 100);
+})();
+function done() { document.title = 'DONE'; window.__autoDone = true; }
+(function w2() { if (!window.__autoDone) setTimeout(w2, 200); })();
+</script>
+</body>
+</html>
+

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>explore-shot</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px monospace;margin:0;padding:8px}pre{margin:0}</style></head>
+<body>
+<pre id="log">prepare…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:960px;height:540px;border:1px solid #444"></iframe>
+<script>
+/* 把探索界面调到"看完 3 个点、按钮已点亮"的状态，停在那里给截图用。
+   ready 参数：1 = 已看够，0 = 还没看够。 */
+var ready = new URLSearchParams(location.search).get('ready') !== '0';
+var log = document.getElementById('log');
+var fr = document.getElementById('f');
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 80); return; }
+  var G = w.Game.G;
+  w.Game.newGame();
+  for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+  for (var n = 0; n < 800 && G.mode !== 'explore'; n++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    else if (G.mode === 'page') { key(w, 'Enter'); }
+    w.Game.__step(1 / 60);
+  }
+  if (G.mode !== 'explore') { log.textContent = '没进探索 mode=' + G.mode; document.title = 'DONE'; window.__autoDone = 1; return; }
+  /* 直接标已看：方便截"按钮点亮"的样子 */
+  var e = G.explore;
+  var n2 = ready ? (e.def.need || e.spots.length) : 1;
+  for (var s = 0; s < n2 && s < e.spots.length; s++) { e.seen[e.spots[s].id] = 1; w.Game.G.flags['__seen_' + e.def.id + '_' + e.spots[s].id] = true; }
+  e.sel = 0;
+  /* 让引擎重画一帧 */
+  w.Game.__step(1 / 60);
+  log.textContent = 'ready=' + ready + '  seen=' + Object.keys(e.seen).length + '/' + e.spots.length +
+    ' need=' + (e.def.need || e.spots.length) + '  出口="' + e.def.exitLabel + '"';
+  document.title = 'DONE';
+  window.__autoDone = 1;
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>

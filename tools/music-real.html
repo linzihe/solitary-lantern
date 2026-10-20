@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>music-real</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.6 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}</style>
+</head>
+<body>
+<pre id="log">running…（真实时间，媒体加载不受虚拟时钟影响）</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:900px;height:520px;border:1px solid #333"></iframe>
+<script>
+/* 用真实时间轮询：__booted 一置位就开始观察 Music.debug()，
+   直到 <audio> 的 readyState 变成 4（或 25 秒超时）。 */
+var log = document.getElementById('log');
+var t0 = Date.now();
+function say(s) { log.textContent += '\n' + s; }
+var iframe = document.getElementById('f');
+var started = false, lastLog = '';
+(function poll() {
+  var w = null; try { w = iframe.contentWindow; } catch (e) {}
+  if (w && w.__booted && !started) { started = true; t0 = Date.now(); say('游戏已启动，开始观察 external music…'); }
+  if (started && w && w.Music) {
+    var d = w.Music.debug();
+    var line = 'ctx=' + d.ctx + ' avail=' + JSON.stringify(d.avail) +
+      ' cur=' + (d.cur ? (d.cur.name + ' rs=' + d.cur.readyState + ' ns=' + d.cur.networkState +
+      ' paused=' + d.cur.paused + ' t=' + d.cur.currentTime + ' dur=' + d.cur.duration + ' gain=' + d.cur.gain) : 'null') +
+      ' pending=' + d.pending;
+    if (line !== lastLog) { say(line); lastLog = line; }
+    if (d.cur && d.cur.readyState === 4 && d.cur.currentTime > 0.3) {
+      say('===== 通过：文件已加载并正在走时间 =====');
+      document.title = 'PASS'; window.__autoDone = true; return;
+    }
+  }
+  if (Date.now() - t0 > 25000) {
+    say('===== 失败：25 秒内没走到 readyState=4 且时间在走 =====');
+    document.title = 'FAIL'; window.__autoDone = true; return;
+  }
+  setTimeout(poll, 250);
+})();
+(function waitDone() { if (!window.__autoDone) setTimeout(waitDone, 300); })();
+</script>
+</body>
+</html>

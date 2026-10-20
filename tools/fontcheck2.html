@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>字体放大对比</title>
+<style>body{margin:0;background:#06050d}canvas{image-rendering:pixelated;display:block}</style></head>
+<body><canvas id="c" width="240" height="80"></canvas>
+<script src="../src/font-data.js"></script>
+<script src="../src/art.js"></script>
+<script>
+var ctx = document.getElementById('c').getContext('2d');
+var PF = Art.PixelFont;
+var LINE = '威卡独修祭坛篝火魔法影子书';
+ctx.fillStyle = '#0c0a1a'; ctx.fillRect(0, 0, 240, 80);
+ctx.fillStyle = '#e0b545'; ctx.fillRect(0, 18, 240, 1);
+ctx.fillStyle = '#4fb6cb'; ctx.fillRect(0, 48, 240, 1);
+PF.draw(ctx, LINE, 4, 4, 12, '#fff4d6');            // 旧：系统黑体二值化
+PF.load(FONT_DATA, function (ok) {
+  PF.draw(ctx, LINE, 4, 22, 12, '#fff4d6');          // 新：点阵字体
+  PF.draw(ctx, LINE, 4, 52, 12, '#fff4d6');
+  document.title = 'font ' + ok;
+});
+</script></body></html>

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>explore-hit</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.5 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}.ok{color:#7fd18a}.bad{color:#ff7b7b}.warn{color:#e0b545}</style>
+</head>
+<body>
+<pre id="log">running…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:960px;height:540px;border:1px solid #333;visibility:hidden"></iframe>
+<script>
+/* 把"继续"按钮的命中区域扫一遍，看哪些位置能点中、哪些不能。
+   同时把按钮的**视觉位置**（面板矩形）和**命中矩形**都打出来，看两者是否一致。 */
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var W = 480, H = 270, fr = document.getElementById('f');
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+function clickV(w, vx, vy) {
+  var c = w.document.getElementById('screen'), r = c.getBoundingClientRect(), sc = r.width / W;
+  c.dispatchEvent(new w.MouseEvent('mousedown', { clientX: r.left + vx * sc, clientY: r.top + vy * sc, bubbles: true, cancelable: true }));
+}
+function moveV(w, vx, vy) {
+  var c = w.document.getElementById('screen'), r = c.getBoundingClientRect(), sc = r.width / W;
+  c.dispatchEvent(new w.MouseEvent('mousemove', { clientX: r.left + vx * sc, clientY: r.top + vy * sc, bubbles: true }));
+}
+function readSpot(w, G, i) {
+  G.explore.sel = i; key(w, 'Enter');
+  for (var k = 0; k < 300 && G.mode === 'scene'; k++) { if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); } w.Game.__step(1 / 60); }
+  w.Game.__step(1 / 60);
+}
+function reset(w, G) {
+  /* 重开一局并走到第一个 explore，读满 need 个点 */
+  w.Game.newGame();
+  for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+  for (var n = 0; n < 600 && G.mode !== 'explore'; n++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    else if (G.mode === 'page') key(w, 'Enter');
+    w.Game.__step(1 / 60);
+  }
+  var need = G.explore.def.need || 5;
+  for (var s = 0; s < need; s++) readSpot(w, G, s);
+}
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 100); return; }
+  var G = w.Game.G;
+  /* 引擎里的命中矩形（和 exploreExitRect 一致） */
+  var R = { x: W - 132, y: H - 32, w: 124, h: 22 };
+  say('引擎命中矩形：x=' + R.x + '..' + (R.x + R.w) + '  y=' + R.y + '..' + (R.y + R.h) + '（宽 124 是为了放下 6 字出口文案）');
+  say('按钮中心：(' + (R.x + R.w / 2) + ', ' + (R.y + R.h / 2) + ')');
+  say('');
+  var probes = [
+    [410, 248], [352, 241], [466, 241], [352, 257], [466, 257],
+    [410, 236], [410, 264], [340, 248], [476, 248], [438, 248]
+  ];
+  /* 分类：框内 = 必须在矩形内；缓冲区 = 框外 3 像素内（引擎有意放宽容错，允许命中）；
+     框外 = 缓冲区之外，必须点不中。 */
+  var TOL = 3;
+  var inHit = 0, inTot = 0, outHit = 0, outTot = 0, bufHit = 0, bufTot = 0;
+  probes.forEach(function (p) {
+    var inside = p[0] > R.x && p[0] < R.x + R.w && p[1] > R.y && p[1] < R.y + R.h;
+    var inBuf = !inside && p[0] > R.x - TOL && p[0] < R.x + R.w + TOL &&
+                p[1] > R.y - TOL && p[1] < R.y + R.h + TOL;
+    reset(w, G);
+    if (G.mode !== 'explore') { say('  (' + p[0] + ',' + p[1] + ') 重置失败 mode=' + G.mode); return; }
+    var before = G.mode + '|' + G.pc;
+    moveV(w, p[0], p[1]); w.Game.__step(1 / 60);
+    var hot = G.explore ? G.explore.exitHot : null;
+    clickV(w, p[0], p[1]); w.Game.__step(1 / 60); w.Game.__step(1 / 60);
+    var after = G.mode + '|' + G.pc;
+    var hit = after !== before;
+    var zone = inside ? '框内' : (inBuf ? '缓冲' : '框外');
+    if (inside) { inTot++; if (hit) inHit++; }
+    else if (inBuf) { bufTot++; if (hit) bufHit++; }
+    else { outTot++; if (hit) outHit++; }
+    say('  点 (' + String(p[0]).padStart(3) + ',' + String(p[1]).padStart(3) + ') [' + zone + '] exitHot=' + hot +
+        '  →  ' + (hit ? '✓ 退出成功' : '✗ 没反应') + '   [' + after + ']');
+  });
+  say('');
+  say('汇总：框内 ' + inHit + '/' + inTot + ' 命中（须全中）；缓冲 ' + bufHit + '/' + bufTot +
+      ' 命中（允许命中）；框外 ' + outHit + '/' + outTot + ' 命中（须为 0）');
+  say((inHit === inTot && outHit === 0 && inTot > 0) ? '===== 通过 =====' : '===== 失败 =====');
+  document.title = 'DONE';
+  window.__autoDone = true;
+})();
+(function waitDone() { if (!window.__autoDone) setTimeout(waitDone, 200); })();
+</script>
+</body>
+</html>

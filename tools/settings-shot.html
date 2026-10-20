@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>settings-shot</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px monospace;margin:0;padding:6px}pre{margin:0}</style></head>
+<body>
+<pre id="log">prepare…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:1100px;height:680px;border:1px solid #444"></iframe>
+<script>
+/* 把界面切到设置页并停住，供截图检查 10 项是否溢出下边框 */
+var fr = document.getElementById('f'), log = document.getElementById('log');
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 80); return; }
+  var G = w.Game.G;
+  w.Game.newGame();
+  for (var i = 0; i < 120; i++) w.Game.__step(1 / 60);
+  G.mode = 'settings'; G.sel = 0;
+  w.Game.__step(1 / 60);
+  log.textContent = 'settings: ' + JSON.stringify(w.Game.__settingsDebug ? w.Game.__settingsDebug() : 'ok');
+  document.title = 'DONE';
+  window.__autoDone = 1;
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>

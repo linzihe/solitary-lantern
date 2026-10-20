@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>explore-check</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.6 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}.ok{color:#7fd18a}.bad{color:#ff7b7b}.warn{color:#e0b545}</style>
+</head>
+<body>
+<pre id="log">running…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:960px;height:540px;border:1px solid #333;visibility:hidden"></iframe>
+<script>
+/* 复现"探索点看完了，点继续没反应"。
+   走真实路径：键盘读点 → 用**鼠标点击**虚拟坐标点"继续"按钮 → 看 mode 有没有变。
+   点击走 canvas 的 mousedown，坐标要换算成客户端坐标（toVirtual 的逆运算）。 */
+var log = document.getElementById('log');
+var out = [];
+function say(s, cls) { out.push(s); log.textContent = out.join('\n'); }
+var W = 480, H = 270;
+var fr = document.getElementById('f');
+var bad = 0;
+
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+function clickVirtual(w, vx, vy) {
+  var cv = w.document.getElementById('screen');
+  var r = cv.getBoundingClientRect();
+  var scale = r.width / W;
+  var cx = r.left + vx * scale, cy = r.top + vy * scale;
+  var ev = new w.MouseEvent('mousedown', { clientX: cx, clientY: cy, bubbles: true, cancelable: true });
+  cv.dispatchEvent(ev);
+}
+
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 100); return; }
+  var G = w.Game.G;
+  w.Game.newGame();
+  for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+  /* 一路推进到第一个 explore */
+  for (var n = 0; n < 600 && G.mode !== 'explore'; n++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    else if (G.mode === 'page') key(w, 'Enter');
+    w.Game.__step(1 / 60);
+  }
+  if (G.mode !== 'explore') { say('✗ 没能进入探索界面（mode=' + G.mode + '）', 'bad'); done(); return; }
+  var e = G.explore;
+  say('进入探索：' + e.def.id + ' 点位 ' + e.spots.length + ' 个，need=' + (e.def.need || e.spots.length) + '，出口文案="' + (e.def.exitLabel || '继续') + '"');
+  /* 用键盘把每个点都读一遍（走真实路径） */
+  for (var s = 0; s < e.spots.length; s++) {
+    e.sel = s;
+    key(w, 'Enter');
+    for (var k = 0; k < 200 && G.mode === 'scene'; k++) {
+      if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+      w.Game.__step(1 / 60);
+    }
+    w.Game.__step(1 / 60);
+  }
+  say('读完后：seen=' + Object.keys(e.seen).length + '/' + e.spots.length + '，mode=' + G.mode);
+  if (G.mode !== 'explore') { say('  ✗ 读完点位后没回到探索界面', 'bad'); bad++; }
+  /* 出口按钮矩形：与引擎里的 exploreExitRect 一致 */
+  var rect = { x: W - 76, y: H - 30, w: 68, h: 17 };
+  say('点击"继续"按钮（虚拟坐标中心 ' + (rect.x + rect.w / 2) + ',' + (rect.y + rect.h / 2) + '）');
+  var before = G.mode + '|' + G.pc + '|' + G.sceneId;
+  clickVirtual(w, rect.x + rect.w / 2, rect.y + rect.h / 2);
+  w.Game.__step(1 / 60);
+  w.Game.__step(1 / 60);
+  var after = G.mode + '|' + G.pc + '|' + G.sceneId;
+  say('点击前 ' + before + '  →  点击后 ' + after);
+  if (before === after) { say('  ✗ 点了没有任何反应（复现成功）', 'bad'); bad++; }
+  else say('  ✓ 点击后状态变了', 'ok');
+  /* 再试"鼠标先划过按钮再点"，看 hover 是不是必要条件 */
+  if (before === after) {
+    say('再试：先把鼠标移到按钮上，再点一次');
+    clickMove(w, rect.x + rect.w / 2, rect.y + rect.h / 2);
+    w.Game.__step(1 / 60);
+    say('  hover 后 exitHot=' + G.explore.exitHot);
+    clickVirtual(w, rect.x + rect.w / 2, rect.y + rect.h / 2);
+    w.Game.__step(1 / 60);
+    say('  再点之后：' + G.mode + '|' + G.pc);
+    if (G.mode !== 'explore') say('  ✓ 说明问题在 hover 没被触发（触屏/无移动时点不动）', 'ok');
+  }
+  done();
+})();
+
+function clickMove(w, vx, vy) {
+  var cv = w.document.getElementById('screen');
+  var r = cv.getBoundingClientRect(), scale = r.width / W;
+  cv.dispatchEvent(new w.MouseEvent('mousemove', { clientX: r.left + vx * scale, clientY: r.top + vy * scale, bubbles: true }));
+}
+function done() {
+  say(bad ? ('===== 失败：' + bad + ' 项 =====') : '===== 通过 =====');
+  document.title = bad ? 'FAIL' : 'PASS';
+  window.__autoDone = true;
+}
+(function waitDone() { if (!window.__autoDone) setTimeout(waitDone, 200); })();
+</script>
+</body>
+</html>

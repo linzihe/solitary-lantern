@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>title-rows</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:11px/1.35 Consolas,monospace;margin:0;padding:8px}pre{margin:0;white-space:pre-wrap}</style></head>
+<body>
+<pre id="log">measuring…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:960px;height:540px;border:1px solid #333;visibility:hidden"></iframe>
+<script>
+/* 把标题页画满一帧，然后按行统计"亮度中等的像素数"。
+   副标题那些淡色字会形成几个峰；峰之间如果没有归零，就是行间重叠。 */
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var fr = document.getElementById('f');
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 100); return; }
+  setTimeout(function () {
+    var cv = w.document.getElementById('screen');
+    var cx = cv.getContext('2d');
+    var d = cx.getImageData(0, 0, 480, 270).data;
+    /* 只看标题区 x=60..420，避开右上角按钮和左侧菜单 */
+    function rowCount(y, lo, hi, x0, x1) {
+      var n = 0;
+      for (var x = x0; x < x1; x++) {
+        var i = (y * 480 + x) * 4, L = (d[i] + d[i + 1] + d[i + 2]) / 3;
+        if (L >= lo && L <= hi) n++;
+      }
+      return n;
+    }
+    say('标题区每一行的墨迹数（x=60..420，亮度 60~235，含淡色字）');
+    say('y   : 数量  柱状');
+    var peaks = [], zeros = [];
+    for (var y = 18; y <= 130; y++) {
+      var n = rowCount(y, 60, 235, 60, 420);
+      if (n === 0) zeros.push(y);
+      if (n > 3) peaks.push({ y: y, n: n });
+      if (y % 1 === 0 && (y >= 40 || n > 0)) {
+        say(String(y).padStart(3) + ' : ' + String(n).padStart(3) + '   ' + '#'.repeat(Math.min(60, n)));
+      }
+    }
+    say('');
+    say('完全空白的行（行间空隙）：' + (zeros.length ? zeros.join(',') : '（没有！说明所有行都连着）'));
+    document.title = 'DONE';
+    window.__autoDone = true;
+  }, 1500);
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>

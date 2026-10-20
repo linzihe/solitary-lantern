@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>probe-ab</title></head>
+<body>
+<pre id="log">probe-ab…</pre>
+<script>
+/* 对照：同一个文件，XHR HEAD vs <audio> 加载，看哪个在 file:// 下真正可用。
+   最后结果写进 document.title，供无头 harness 判断，不依赖文本抓取。 */
+var log = document.getElementById('log');
+function say(s) { log.textContent += '\n' + s; }
+var U = 'file:///D:/下载/pixel-wicca-v2/music/title.mp3';
+var res = {};
+
+var xhr = new XMLHttpRequest();
+try {
+  xhr.open('HEAD', U, true);
+  xhr.onload = function () { res.head = 'status=' + xhr.status + ' len=' + (xhr.getResponseHeader('Content-Length') || '?'); say('XHR HEAD: ' + res.head); };
+  xhr.onerror = function () { res.head = 'onerror'; say('XHR HEAD: onerror'); };
+  xhr.send(null);
+} catch (e) { res.head = 'throw:' + e.message; say('XHR HEAD: throw ' + e.message); }
+
+var a = new Audio();
+a.preload = 'metadata';
+a.onloadedmetadata = function () { res.audio = 'loadedmetadata dur=' + a.duration.toFixed(1); say('audio: ' + res.audio); };
+a.oncanplay = function () { if (!res.audio) { res.audio = 'canplay'; say('audio: canplay'); } };
+a.onerror = function () { res.audio = 'error code=' + (a.error && a.error.code); say('audio: ' + res.audio); };
+a.src = U;
+a.load();
+
+setTimeout(function () {
+  say('');
+  say('结论：XHR HEAD=' + res.head + '   <audio>=' + res.audio);
+  document.title = 'HEAD=' + (res.head || 'none') + '|AUDIO=' + (res.audio || 'none');
+  window.__autoDone = true;
+}, 3000);
+(function w() { if (!window.__autoDone) setTimeout(w, 200); })();
+</script>
+</body>
+</html>

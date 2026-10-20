@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>glyph-metrics</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.5 Consolas,monospace;margin:0;padding:8px}pre{margin:0;white-space:pre-wrap}</style></head>
+<body>
+<pre id="log">measuring…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:900px;height:520px;border:1px solid #333;visibility:hidden"></iframe>
+<script>
+/* 量每个字号下"含中文字"的真实行高：把一行字画到画布上，扫描墨迹的行范围。
+   和调用方实际用的行距对照，就能算出到底有多少重叠。 */
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var fr = document.getElementById('f');
+function bbox(w, text, size) {
+  var cv = w.document.createElement('canvas'); cv.width = 200; cv.height = 90;
+  var cx = cv.getContext('2d');
+  w.Art.PixelFont.draw(cx, text, 2, 2, size, '#ffffff', {});
+  var d = cx.getImageData(0, 0, cv.width, cv.height).data;
+  var top = -1, bot = -1;
+  for (var y = 0; y < cv.height && top < 0; y++)
+    for (var x = 0; x < cv.width; x++) if (d[(y * cv.width + x) * 4 + 3] > 0) { top = y; break; }
+  for (var y2 = cv.height - 1; y2 >= 0 && bot < 0; y2--)
+    for (var x2 = 0; x2 < cv.width; x2++) if (d[(y2 * cv.width + x2) * 4 + 3] > 0) { bot = y2; break; }
+  return { top: top, bot: bot, h: bot - top + 1, wpx: w.Art.PixelFont.width(text, size) };
+}
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted && w.Art && w.Art.PixelFont); } catch (e) {}
+  if (!ok) { setTimeout(poll, 100); return; }
+  say('字号 | 相对 y=2 的墨迹范围 | 字形高 | 宽度(\"独修者的灯\"4字)');
+  [8, 9, 10, 11, 12, 14, 16, 20, 24, 30].forEach(function (sz) {
+    var b = bbox(w, '独修者的灯', sz);
+    say(String(sz).padStart(3) + '  | y ' + b.top + '..' + b.bot + '  |  ' + String(b.h).padStart(2) + '   | ' + b.wpx);
+  });
+  say('');
+  say('标题页实际用的行距（从代码里读）：');
+  say('  主标题 size=30 ；英文副标题 size=12 ；中文副标题 size=12 ；参考行 size=10');
+  var b30 = bbox(w, '独修者的灯', 30), b12 = bbox(w, 'THE SOLITARY LANTERN', 12), b12c = bbox(w, '一本能玩的《威卡：独修者指南》', 12), b10 = bbox(w, '知识参考', 10);
+  say('');
+  say('实测字形高：size30=' + b30.h + '  size12(英文)=' + b12.h + '  size12(中文)=' + b12c.h + '  size10=' + b10.h);
+  document.title = 'DONE';
+  window.__autoDone = true;
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>

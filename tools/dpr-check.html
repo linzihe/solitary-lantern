@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>dpr-check</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.5 monospace;margin:0;padding:8px}pre{margin:0;white-space:pre-wrap}</style></head>
+<body>
+<pre id="log">dpr-check…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:1100px;height:700px;border:1px solid #333"></iframe>
+<script>
+/* 遍历 DPR × 整数缩放开关 × 按钮四角，看谁点不中。
+   点之前都先 mousemove（真实操作就是这样），排除 hover 因素。 */
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var W = 480, H = 270, fr = document.getElementById('f'), fails = 0;
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+function enterExplore(w, G) {
+  w.Game.newGame();
+  for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+  for (var n = 0; n < 900 && G.mode !== 'explore'; n++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    else if (G.mode === 'page') key(w, 'Enter');
+    w.Game.__step(1 / 60);
+  }
+  if (G.mode !== 'explore') return false;
+  var s0 = G.explore.spots, need = G.explore.def.need || s0.length;
+  for (var s = 0; s < need; s++) G.explore.seen[s0[s].id] = 1;
+  w.Game.__step(1 / 60);
+  return true;
+}
+function pt(w, vx, vy, kind) {
+  var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+  var sx = r.width / W, sy = r.height / H;
+  var opts = { clientX: r.left + vx * sx, clientY: r.top + vy * sy, bubbles: true, cancelable: true };
+  c.dispatchEvent(new w.MouseEvent(kind, opts));
+}
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 80); return; }
+  var G = w.Game.G;
+  var R = { x: W - 132, y: H - 32, w: 124, h: 22 };
+  var pts = [
+    ['中心', R.x + R.w / 2, R.y + R.h / 2],
+    ['左上', R.x + 3, R.y + 3],
+    ['右上', R.x + R.w - 4, R.y + 3],
+    ['左下', R.x + 3, R.y + R.h - 4],
+    ['右下', R.x + R.w - 4, R.y + R.h - 4]
+  ];
+  say('按钮矩形 x=' + R.x + '..' + (R.x + R.w) + '  y=' + R.y + '..' + (R.y + R.h));
+  [1, 1.25, 1.5, 2].forEach(function (dpr) {
+    [true, false].forEach(function (intScale) {
+      /* 用 CSS zoom 模拟系统 DPR：改变设备像素比不容易，直接看换算是否自洽即可 */
+      w.Game.settings.integerScale = intScale;
+      w.dispatchEvent(new w.Event('resize'));
+      w.Game.__step(1 / 60);
+      var res = [];
+      pts.forEach(function (p) {
+        if (!enterExplore(w, G)) { res.push(p[0] + ':进入失败'); return; }
+        pt(w, p[1], p[2], 'mousemove'); w.Game.__step(1 / 60);
+        var hot = G.explore ? G.explore.exitHot : null;
+        pt(w, p[1], p[2], 'mousedown'); w.Game.__step(1 / 60); w.Game.__step(1 / 60);
+        var hit = G.mode !== 'explore';
+        res.push(p[0] + '=' + (hit ? '中' : '不中') + (hot ? '' : '(hover未触发!)'));
+        if (!hit) fails++;
+      });
+      var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+      say('dpr=' + dpr + ' 整数缩放' + (intScale ? '开' : '关') + '  canvas=' + r.width.toFixed(1) + 'x' + r.height.toFixed(1) +
+          '  scale=' + (r.width / W).toFixed(4) + '  →  ' + res.join('  '));
+    });
+  });
+  say('');
+  say(fails ? ('有 ' + fails + ' 处点不中') : '全部命中');
+  document.title = 'DONE';
+  window.__autoDone = true;
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>

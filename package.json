@@ -1,0 +1,16 @@
+{
+  "name": "pixel-wicca-v2",
+  "version": "1.0.0",
+  "description": "双击根目录 `index.html` 或 `dist/index.html` 均可离线游玩，不需要安装依赖或启动服务器。 按回车或点击推进；选择题用方向键与回车，也可以直接点击。 设置中可分别调整音乐、音效，或静音。",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "subset-font": "^2.9.0"
+  }
+}

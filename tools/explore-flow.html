@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>explore-flow</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.55 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}.ok{color:#7fd18a}.bad{color:#ff7b7b}.warn{color:#e0b545}</style>
+</head>
+<body>
+<pre id="log">running…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:960px;height:540px;border:1px solid #333;visibility:hidden"></iframe>
+<script>
+/* 按用户描述的场景逐步走：只看 need 个点 → 点"继续" → 看后面是否还能推进。
+   每一步都打印 mode/pc/对话框，找出"点了没反应"的确切位置。 */
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var W = 480, H = 270, fr = document.getElementById('f'), bad = 0;
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+function cv(w) { return w.document.getElementById('screen'); }
+function clickVirtual(w, vx, vy) {
+  var c = cv(w), r = c.getBoundingClientRect(), sc = r.width / W;
+  c.dispatchEvent(new w.MouseEvent('mousedown', { clientX: r.left + vx * sc, clientY: r.top + vy * sc, bubbles: true, cancelable: true }));
+}
+function moveVirtual(w, vx, vy) {
+  var c = cv(w), r = c.getBoundingClientRect(), sc = r.width / W;
+  c.dispatchEvent(new w.MouseEvent('mousemove', { clientX: r.left + vx * sc, clientY: r.top + vy * sc, bubbles: true }));
+}
+function state(G) {
+  var d = G.dlg ? (G.dlg.kind + '"' + String(G.dlg.text).slice(0, 14) + '"') : '-';
+  return G.mode + ' pc=' + G.pc + ' ' + (G.explore ? ('explore=' + G.explore.def.id + ' seen=' + Object.keys(G.explore.seen).length) : '') + ' dlg=' + d;
+}
+function readSpot(w, G, idx) {
+  G.explore.sel = idx;
+  key(w, 'Enter');
+  for (var k = 0; k < 300 && G.mode === 'scene'; k++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    w.Game.__step(1 / 60);
+  }
+  w.Game.__step(1 / 60);
+}
+function advance(w, G, label) {
+  for (var k = 0; k < 400; k++) {
+    if (G.mode === 'explore' || G.mode === 'ending' || G.mode === 'trial' || G.mode === 'choice') break;
+    if (G.mode === 'page') key(w, 'Enter');
+    else if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    w.Game.__step(1 / 60);
+  }
+  say('  ' + label + ' → ' + state(G));
+}
+
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 100); return; }
+  var G = w.Game.G;
+  w.Game.newGame();
+  for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+  for (var n = 0; n < 600 && G.mode !== 'explore'; n++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    else if (G.mode === 'page') key(w, 'Enter');
+    w.Game.__step(1 / 60);
+  }
+  say('① 第一个探索 ' + G.explore.def.id + '，need=' + G.explore.def.need + '，出口="' + G.explore.def.exitLabel + '"');
+  /* —— 只读 need 个点就点继续（用户说的"看完了三个"）—— */
+  var need = G.explore.def.need || G.explore.spots.length;
+  for (var s = 0; s < need; s++) readSpot(w, G, s);
+  say('② 读了 ' + need + ' 个点：' + state(G));
+  var before = state(G);
+  moveVirtual(w, 438, 248);            // 先把鼠标划过按钮（真实操作里鼠标本来就在按钮上）
+  w.Game.__step(1 / 60);
+  say('   鼠标划过按钮后 exitHot=' + (G.explore ? G.explore.exitHot : 'n/a') + '，canExit=' + (w.Game.G.explore ? '需要时才算' : '-'));
+  clickVirtual(w, 438, 248);
+  w.Game.__step(1 / 60); w.Game.__step(1 / 60);
+  say('③ 点了继续："' + before + '" → "' + state(G) + '"');
+  if (before === state(G)) { say('   ✗ 没反应', 'bad'); bad++; } else say('   ✓ 退出成功', 'ok');
+  /* —— 退出之后还能不能继续推进 —— */
+  advance(w, G, '④ 退出后一路推进');
+  if (G.mode === 'explore') {
+    say('   到了下一个探索 ' + G.explore.def.id + '，出口="' + G.explore.def.exitLabel + '"');
+    var need2 = G.explore.def.need || G.explore.spots.length;
+    for (var s2 = 0; s2 < need2; s2++) readSpot(w, G, s2);
+    say('⑤ 第二个探索读了 ' + need2 + ' 个：' + state(G));
+    var b2 = state(G);
+    moveVirtual(w, 438, 248); w.Game.__step(1 / 60);
+    clickVirtual(w, 438, 248);
+    w.Game.__step(1 / 60); w.Game.__step(1 / 60);
+    say('⑥ 点继续："' + b2 + '" → "' + state(G) + '"');
+    if (b2 === state(G)) { say('   ✗ 没反应（复现！）', 'bad'); bad++; } else say('   ✓ 退出成功', 'ok');
+    advance(w, G, '⑦ 再往后推进');
+  }
+  /* —— 检查一个隐患：need 没满足时点按钮，会不会静默失败 —— */
+  say('⑧ 当前 ' + state(G));
+  done();
+})();
+function done() {
+  say(bad ? ('===== 失败：' + bad + ' 项 =====') : '===== 通过 =====');
+  document.title = bad ? 'FAIL' : 'PASS';
+  window.__autoDone = true;
+}
+(function waitDone() { if (!window.__autoDone) setTimeout(waitDone, 200); })();
+</script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>portrait gen</title>
+<style>html,body{margin:0;padding:0;background:#000;overflow:hidden}canvas{display:block;image-rendering:pixelated}</style></head>
+<body>
+<canvas id="he" width="100" height="116"></canvas>
+<canvas id="bai" width="100" height="116"></canvas>
+<script>
+var ONLY = (/only=(\w+)/.exec(location.search) || [0, ''])[1];
+if (ONLY) { var hide = ONLY === 'he' ? 'bai' : 'he'; document.getElementById(hide).style.display = 'none'; }
+</script>
+<script>
+/* 用 100×116 的调色 + 抖动明暗画出两位新角色的立绘，风格对齐已有的四张。
+ * 每个角色单独占据一个 canvas，逐张截图导出。 */
+var C = {
+  ink:'#1a1420', ink2:'#2a2233',
+  skin0:'#6d4527', skin1:'#96603a', skin2:'#b87c4e', skin3:'#d5a172', skin4:'#ecc49b',
+  hair0:'#1d1410', hair1:'#33231a', hair2:'#4d3524', hair3:'#6b4c33',
+  green0:'#16261c', green1:'#24402c', green2:'#355c3d', green3:'#4c7b50',
+  brown0:'#241609', brown1:'#3a2413', brown2:'#5a3a1e', brown3:'#7d5626',
+  blue0:'#1b2436', blue1:'#2b3a58', blue2:'#41577d', blue3:'#5d78a1',
+  gray0:'#4a4a58', gray1:'#6b6b7c', gray2:'#8f8fa0',
+  parch:'#f0ddb0', parch2:'#d9c08a', gold2:'#e0b545', white:'#f6f2ff'
+};
+function rng(seed){var s=seed|0||1;return function(){s^=s<<13;s|=0;s^=s>>>17;s^=s<<5;s|=0;return((s>>>0)%100000)/100000;};}
+
+// 通用绘制助手：椭圆、抖动填充、竖渐
+function ell(ctx,cx,cy,rx,ry,col,shade){for(var y=-ry;y<=ry;y++)for(var x=-rx;x<=rx;x++){if((x*x)/(rx*rx)+(y*y)/(ry*ry)<=1){var c=shade?shade(x,y):col;if(c)ctx.fillStyle=c,ctx.fillRect(cx+x,cy+y,1,1);}}}
+function rect(ctx,x,y,w,h,col){ctx.fillStyle=col;ctx.fillRect(x,y,w,h);}
+function dither(ctx,x,y,w,h,a,b,t){for(var j=0;j<h;j++)for(var i=0;i<w;i++){var k=((i+j*2)%4);ctx.fillStyle=(k<t)?a:b;ctx.fillRect(x+i,y+j,1,1);}}
+
+/* ---------- 阿禾：十七岁，短发扎在脑后，布衣，怀里抱着手链 ---------- */
+(function(){
+  var ctx=document.getElementById('he').getContext('2d');
+  var r=rng(7);
+  // 背景：虚化的林间暮色
+  for(var y=0;y<116;y++){var t=y/116;
+    ctx.fillStyle=t<0.5?'#20283a':'#2c3a2e';ctx.fillRect(0,y,100,1);}
+  dither(ctx,0,0,100,116,'#1a2030','#26302c',2);
+  for(var i=0;i<26;i++){var bx=r()*100,by=r()*70;rect(ctx,bx|0,by|0,1,1,'#39465c');}
+  ell(ctx,50,116,42,30,'#2f3d2c');
+  // 身体：粗布衣
+  ell(ctx,50,104,30,26,C.green1);
+  ell(ctx,50,102,28,22,C.green2,function(x,y){return (x+y*1.4)<0?C.green2:((x>6&&y<0)?C.green3:C.green2);});
+  rect(ctx,22,96,56,20,C.green1);
+  ell(ctx,50,116,34,16,C.green0);
+  // 领口
+  rect(ctx,44,86,12,6,C.brown1); rect(ctx,45,87,10,4,C.brown2);
+  // 脖子
+  rect(ctx,45,78,10,10,C.skin1); rect(ctx,46,78,8,8,C.skin2);
+  // 脸
+  ell(ctx,50,66,13,17,C.skin2);
+  ell(ctx,50,64,12,14,C.skin3,function(x,y){return x<-4?C.skin2:(x>5||y>7?C.skin2:C.skin3);});
+  ell(ctx,46,58,5,4,C.skin4);           // 高光
+  // 头发（黑短发+脑后发髻）
+  ell(ctx,50,54,15,13,C.hair1);
+  ell(ctx,50,52,13,11,C.hair2,function(x,y){return y<-6?C.hair3:C.hair2;});
+  rect(ctx,35,52,3,20,C.hair1); rect(ctx,62,52,3,18,C.hair0);
+  ell(ctx,50,44,10,7,C.hair2);
+  ell(ctx,64,58,5,6,C.hair1);           // 发髻
+  // 五官
+  rect(ctx,44,64,3,2,C.ink); rect(ctx,53,64,3,2,C.ink);
+  rect(ctx,44,63,3,1,C.hair0); rect(ctx,53,63,3,1,C.hair0);
+  rect(ctx,45,64,1,1,C.ink2); rect(ctx,54,64,1,1,C.ink2);
+  rect(ctx,49,69,2,2,C.skin1);
+  rect(ctx,46,75,8,1,'#a25a4a');        // 嘴
+  rect(ctx,45,76,10,1,C.skin1);
+  ell(ctx,41,72,3,2,'#b96a5c'); ell(ctx,59,72,3,2,'#b96a5c');   // 颊红
+  // 手：捧着手链
+  rect(ctx,36,104,8,8,C.skin2); rect(ctx,56,104,8,8,C.skin2);
+  rect(ctx,38,102,5,3,C.skin3); rect(ctx,57,102,5,3,C.skin3);
+  for(var k=0;k<9;k++){var ax=40+k*2;rect(ctx,ax,100+((k%2)?0:1),2,1,C.gold2);rect(ctx,ax,101+((k%2)?0:1),2,1,'#b8891f');}
+  rect(ctx,48,98,3,3,C.white);
+  // 边缘压暗
+  ctx.globalAlpha=0.35; dither(ctx,0,0,8,116,'#0a0810','rgba(0,0,0,0)',2);
+  ctx.globalAlpha=1;
+})();
+
+/* ---------- 白先生：四十来岁，八字胡，灰蓝长衫，肩上挎着包袱 ---------- */
+(function(){
+  var ctx=document.getElementById('bai').getContext('2d');
+  var r=rng(11);
+  for(var y=0;y<116;y++){var t=y/116;ctx.fillStyle=t<0.5?'#2c2a3a':'#38301f';ctx.fillRect(0,y,100,1);}
+  dither(ctx,0,0,100,116,'#241f30','#332c1e',2);
+  for(var i=0;i<18;i++){var bx=r()*100,by=r()*60;rect(ctx,bx|0,by|0,1,1,'#4a4458');}
+  // 包袱卷在肩上
+  ell(ctx,74,92,17,12,C.brown1);
+  ell(ctx,74,90,15,10,C.brown2,function(x,y){return (x+y)<-6?C.brown3:C.brown2;});
+  rect(ctx,60,84,44,4,C.brown0);
+  // 长衫
+  ell(ctx,48,106,30,28,C.blue0);
+  ell(ctx,48,102,28,24,C.blue1,function(x,y){return x<-8?C.blue0:(x>8?C.blue0:C.blue1);});
+  rect(ctx,20,94,56,22,C.blue1); rect(ctx,20,110,56,6,C.blue0);
+  // 衣襟
+  rect(ctx,46,80,3,34,C.blue2); rect(ctx,51,80,3,34,C.blue2);
+  rect(ctx,44,80,12,8,C.blue2);
+  // 腰绳
+  rect(ctx,20,100,56,4,C.brown2); rect(ctx,20,101,56,1,C.brown3);
+  // 脖子与脸
+  rect(ctx,43,72,12,10,C.skin1); rect(ctx,44,72,10,8,C.skin2);
+  ell(ctx,49,62,14,16,C.skin1);
+  ell(ctx,49,60,13,13,C.skin2,function(x,y){return x<-4?C.skin1:(x>5||y>8?C.skin1:C.skin2);});
+  ell(ctx,45,54,5,4,C.skin3);
+  // 头发（后梳，鬓角灰）
+  ell(ctx,49,48,15,12,C.hair1);
+  ell(ctx,49,46,13,9,C.hair2,function(x,y){return y<-6?C.hair3:C.hair2;});
+  rect(ctx,34,46,4,22,C.hair0); rect(ctx,61,46,4,22,C.hair1);
+  dither(ctx,34,58,4,8,C.gray1,C.hair1,2); dither(ctx,61,58,4,8,C.gray1,C.hair0,2);
+  // 眉、眼、八字胡
+  rect(ctx,42,57,5,2,C.hair0); rect(ctx,52,57,5,2,C.hair0);
+  rect(ctx,43,61,3,2,C.ink); rect(ctx,53,61,3,2,C.ink);
+  rect(ctx,43,61,3,1,C.ink2); rect(ctx,53,61,3,1,C.ink2);
+  rect(ctx,48,64,3,4,C.skin1);
+  rect(ctx,42,70,15,2,C.hair1); rect(ctx,40,71,7,2,C.hair1); rect(ctx,53,71,7,2,C.hair1);   // 八字胡
+  rect(ctx,45,75,9,1,'#8a4a3c');
+  ell(ctx,40,68,3,2,'#a86a52'); ell(ctx,58,68,3,2,'#a86a52');
+  // 一只手指着（兜售的姿势）
+  rect(ctx,66,92,10,6,C.skin2); rect(ctx,72,90,6,4,C.skin3);
+  ctx.globalAlpha=0.35; dither(ctx,92,0,8,116,'#0a0810','rgba(0,0,0,0)',2); ctx.globalAlpha=1;
+})();
+</script></body></html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>perf-check · 每帧代价</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.6 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}.ok{color:#7fd18a}.bad{color:#ff7b7b}.warn{color:#e0b545}</style>
+</head>
+<body>
+<pre id="log">running…</pre>
+<iframe id="f" style="width:960px;height:540px;border:1px solid #333;visibility:hidden"></iframe>
+<script>
+/* 性能验证：量两个东西。
+   1) 每个状态下的「每帧新建 canvas 数」—— 必须为 0。
+      这是这个项目最容易出的性能坑：在每帧调用的路径里创建 canvas
+      （比如"量文字宽度"顺手开一个离屏 canvas），肉眼看不出来，只在长跑里拖慢。
+   2) 每帧 update+draw 的耗时（ms）。先热身 8 帧，再清零计数开测。
+   注意：无头 + 虚拟时间下，performance.now() 的墙钟不能反映真实渲染代价，
+   所以这里的 ms 只用来发现"明显异常"（比如每帧几毫秒以上的纯 JS 开销）。 */
+var CONFIG = { target: '../dist/index.html', framesPerState: 240, warmup: 8, idleLimit: 0 };
+var log = document.getElementById('log');
+var out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+
+function hookInPage() {
+  window.__canvasCreated = 0;
+  var rawCreate = document.createElement;
+  document.createElement = function (tag) {
+    if (String(tag).toLowerCase() === 'canvas') window.__canvasCreated++;
+    return rawCreate.apply(document, arguments);
+  };
+  var rawRAF = window.requestAnimationFrame;
+  window.requestAnimationFrame = function () { return 0; };
+  void rawRAF;
+}
+
+var xhr = new XMLHttpRequest();
+xhr.open('GET', CONFIG.target, false);
+xhr.send(null);
+var html = xhr.responseText;
+var inject =
+  '<script>(' + hookInPage.toString() + ')();</' + 'script>' +
+  '<script>addEventListener("DOMContentLoaded",function(){try{Art.PixelFont.load=function(f,d){d(false);};}catch(e){}});</' + 'script>';
+var pos = html.indexOf('<script src=');
+html = html.slice(0, pos) + inject + html.slice(pos);
+var iframe = document.getElementById('f');
+iframe.srcdoc = html;
+
+var STATES = [
+  { name: '标题页', setup: function (w, G) { G.mode = 'title'; } },
+  { name: '对白（打字机中）', setup: function (w, G) { G.mode = 'scene'; if (G.dlg) G.dlg.shown = 1; } },
+  { name: '探索界面', setup: function (w, G) { if (G.explore) G.mode = 'explore'; } },
+  { name: '试炼（玩法中）', setup: function (w, G) { if (w.UI.Trial.state) G.mode = 'trial'; } },
+  { name: '图鉴', setup: function (w, G) { G.mode = 'codex'; } },
+  { name: '地图', setup: function (w, G) { G.mode = 'map'; } },
+  { name: '结局面板', setup: function (w, G) { w.Game.unhideAll(); G.mode = 'ending'; w.Game.__step(1 / 60); } }
+];
+
+function measure(w) {
+  var G = w.Game.G, bad = 0;
+  say('状态'.padEnd(18) + '每帧新建 canvas   ms/帧(中位)  帧数');
+  var worstCanvas = 0, worstMs = 0;
+  STATES.forEach(function (st) {
+    try { st.setup(w, G); } catch (e) { say(st.name + '  setup 异常: ' + e.message, 'bad'); bad++; return; }
+    for (var i = 0; i < CONFIG.warmup; i++) w.Game.__step(1 / 60);
+    w.__canvasCreated = 0;
+    var times = [];
+    for (var k = 0; k < CONFIG.framesPerState; k++) {
+      var t0 = (window.performance && performance.now) ? performance.now() : 0;
+      w.Game.__step(1 / 60);
+      var t1 = (window.performance && performance.now) ? performance.now() : 0;
+      times.push(t1 - t0);
+    }
+    var created = w.__canvasCreated;
+    times.sort(function (a, b) { return a - b; });
+    var med = times[Math.floor(times.length / 2)];
+    if (created > 0) { say(st.name.padEnd(18) + String(created).padEnd(17) + med.toFixed(3).padEnd(14) + times.length + '  ✗', 'bad'); bad++; worstCanvas = Math.max(worstCanvas, created); }
+    else say(st.name.padEnd(18) + '0'.padEnd(17) + med.toFixed(3).padEnd(14) + times.length + '  ✓', 'ok');
+    worstMs = Math.max(worstMs, med);
+  });
+  say('');
+  if (worstCanvas === 0) say('✓ 所有状态的「每帧新建 canvas 数」都是 0', 'ok');
+  else { say('✗ 有状态每帧新建 canvas（最多 ' + worstCanvas + ' 个/帧）—— 去查 draw/文字度量路径', 'bad'); }
+  if (worstMs < 5) say('✓ 最慢状态的中位帧耗时 ' + worstMs.toFixed(3) + ' ms < 5 ms', 'ok');
+  else if (worstMs < 10) say('· 最慢状态中位 ' + worstMs.toFixed(3) + ' ms（<10，可接受但要留意）', 'warn');
+  else { say('✗ 最慢状态中位 ' + worstMs.toFixed(3) + ' ms ≥ 10 ms', 'bad'); bad++; }
+  say('说明：无头 + 虚拟时间下墙钟不可靠，ms 只用于发现明显异常。');
+  return bad;
+}
+
+(function poll() {
+  var w = null, ok = false;
+  try { w = iframe.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (ok) {
+    var bad = 0;
+    try {
+      var G = w.Game.G;
+      w.Game.newGame();
+      for (var i = 0; i < 120; i++) w.Game.__step(1 / 60);
+      /* 走到探索界面，再进一个试炼，保证各状态都有内容可画 */
+      for (var n = 0; n < 600 && !G.explore; n++) {
+        if (G.dlg) G.dlg.shown = G.dlg.text.length;
+        w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        w.Game.__step(1 / 60);
+      }
+      bad += measure(w);
+      window.__perf = { canvas: w.__canvasCreated };
+    } catch (e) { say('harness 异常：' + e.message + '\n' + (e.stack || ''), 'bad'); bad++; }
+    say(bad ? ('===== 失败：' + bad + ' 项 =====') : '===== 通过 =====');
+    document.title = bad ? 'FAIL' : 'PASS';
+    window.__autoDone = true;
+    return;
+  }
+  setTimeout(poll, 100);
+})();
+(function waitDone() { if (!window.__autoDone) setTimeout(waitDone, 200); })();
+</script>
+</body>
+</html>

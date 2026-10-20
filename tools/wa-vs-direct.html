@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>webaudio-vs-direct</title></head>
+<body>
+<pre id="log">webaudio-vs-direct…</pre>
+<script>
+/* 决定性对照：同一首 MP3、同一时刻起播，
+   A = 走 WebAudio（createMediaElementSource → gain → destination）
+   B = 直接播（不接图）
+   5 秒后看谁的时间真的在走。 */
+var log = document.getElementById('log');
+function say(s) { log.textContent += '\n' + s; }
+var URL_ = 'file:///D:/下载/pixel-wicca-v2/music/title.mp3';
+var ctx = new (window.AudioContext || window.webkitAudioContext)();
+try { ctx.resume(); } catch (e) {}
+
+var A = new Audio(), B = new Audio();
+A.preload = 'auto'; B.preload = 'auto';
+A.src = URL_; B.src = URL_;
+var g = ctx.createGain(); g.gain.value = 0.5;
+var node = ctx.createMediaElementSource(A);
+node.connect(g); g.connect(ctx.destination);
+
+A.play().catch(function (e) { say('A play rejected ' + e.name); });
+B.play().catch(function (e) { say('B play rejected ' + e.name); });
+
+setTimeout(function () {
+  say('5 秒后：');
+  say('  A（WebAudio 路由）currentTime=' + A.currentTime.toFixed(2) + ' readyState=' + A.readyState + ' paused=' + A.paused);
+  say('  B（直接播放）   currentTime=' + B.currentTime.toFixed(2) + ' readyState=' + B.readyState + ' paused=' + B.paused);
+  say('  ctx.state=' + ctx.state);
+  document.title = 'DONE';
+}, 5000);
+(function w() { if (document.title !== 'DONE') setTimeout(w, 300); })();
+</script>
+</body>
+</html>

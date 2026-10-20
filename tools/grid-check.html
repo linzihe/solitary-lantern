@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>grid-check</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.45 monospace;margin:0;padding:8px}pre{margin:0;white-space:pre-wrap}</style></head>
+<body>
+<pre id="log">grid-check…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:1100px;height:700px;border:0;opacity:0.01"></iframe>
+<script>
+/* 密集网格：把"继续"按钮画出去的那块区域按 4px 步长扫一遍，
+   记录哪些点命中、哪些不命中，用二维图看形状 —— 能直接看出偏移/缩放错位。 */
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var W = 480, H = 270, fr = document.getElementById('f'), fails = 0;
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+function enterExplore(w, G) {
+  w.Game.newGame();
+  for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+  for (var n = 0; n < 900 && G.mode !== 'explore'; n++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    else if (G.mode === 'page') key(w, 'Enter');
+    w.Game.__step(1 / 60);
+  }
+  if (G.mode !== 'explore') return false;
+  var s0 = G.explore.spots, need = G.explore.def.need || s0.length;
+  for (var s = 0; s < need; s++) G.explore.seen[s0[s].id] = 1;
+  w.Game.__step(1 / 60);
+  return true;
+}
+function probe(w, vx, vy) {
+  var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+  var sx = r.width / W, sy = r.height / H;
+  var x = r.left + vx * sx, y = r.top + vy * sy;
+  c.dispatchEvent(new w.MouseEvent('mousemove', { clientX: x, clientY: y, bubbles: true }));
+  w.Game.__step(1 / 60);
+  c.dispatchEvent(new w.MouseEvent('mousedown', { clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  w.Game.__step(1 / 60); w.Game.__step(1 / 60);
+  return w.Game.G.mode !== 'explore';
+}
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 80); return; }
+  var G = w.Game.G;
+  w.Game.settings.integerScale = false;
+  w.dispatchEvent(new w.Event('resize'));
+  w.Game.__step(1 / 60);
+  var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+  say('窗口 ' + w.innerWidth + 'x' + w.innerHeight + '  canvas CSS ' + r.width.toFixed(2) + 'x' + r.height.toFixed(2) +
+      '  scale ' + (r.width / W).toFixed(5));
+  say('按钮矩形虚拟坐标 x=348..472  y=238..260');
+  say('');
+  say('扫描（4px 步长；#=命中  .=未命中）  列 = 虚拟 x 336→476，行 = 虚拟 y 228→268');
+  for (var vy = 228; vy <= 268; vy += 4) {
+    var line = 'y=' + String(vy).padStart(3) + ' ';
+    for (var vx = 336; vx <= 476; vx += 4) {
+      if (!enterExplore(w, G)) { line += '?'; continue; }
+      var hit = probe(w, vx, vy);
+      if (!hit) fails++;
+      line += hit ? '#' : '.';
+    }
+    say(line);
+  }
+  say('');
+  say('未命中格数：' + fails + '（其中落在按钮矩形外的属于正常）');
+  document.title = 'DONE';
+  window.__autoDone = true;
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>

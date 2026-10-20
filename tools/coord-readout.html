@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>coord-readout</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.5 monospace;margin:0;padding:0}
+pre{margin:0;white-space:pre-wrap;font-size:11px}</style></head>
+<body>
+<pre id="log">coord-readout…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:1100px;height:700px;border:0"></iframe>
+<script>
+/* 把"虚拟坐标 → 客户端坐标"的换算在两个缩放下都走一遍，
+   顺便把 8 个方向各偏移 1 个物理像素，看 hitbox 边界在哪。
+   目的：确认非整数缩放下是否存在"整体偏移"（哪怕 1px）。 */
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var W = 480, H = 270, fr = document.getElementById('f');
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+function enterExplore(w, G) {
+  w.Game.newGame();
+  for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+  for (var n = 0; n < 900 && G.mode !== 'explore'; n++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    else if (G.mode === 'page') key(w, 'Enter');
+    w.Game.__step(1 / 60);
+  }
+  if (G.mode !== 'explore') return false;
+  var s0 = G.explore.spots, need = G.explore.def.need || s0.length;
+  for (var s = 0; s < need; s++) G.explore.seen[s0[s].id] = 1;
+  w.Game.__step(1 / 60);
+  return true;
+}
+/* 用"屏幕坐标"点击：先给出目标虚拟坐标，再由本页换算成客户端坐标 */
+function clickAt(w, vx, vy, dx, dy) {
+  var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+  var sx = r.width / W, sy = r.height / H;
+  var x = r.left + vx * sx + (dx || 0), y = r.top + vy * sy + (dy || 0);
+  c.dispatchEvent(new w.MouseEvent('mousemove', { clientX: x, clientY: y, bubbles: true }));
+  w.Game.__step(1 / 60);
+  c.dispatchEvent(new w.MouseEvent('mousedown', { clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  w.Game.__step(1 / 60); w.Game.__step(1 / 60);
+  return w.Game.G.mode !== 'explore';
+}
+/* 反过来：给客户端坐标，问引擎"你认为这是哪个虚拟点"（复刻 toVirtual 的算法） */
+function virtualOf(w, clientX, clientY) {
+  var r = w.document.getElementById('screen').getBoundingClientRect();
+  return { vx: Math.floor((clientX - r.left) / (r.width / W)), vy: Math.floor((clientY - r.top) / (r.height / H)) };
+}
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 80); return; }
+  var G = w.Game.G;
+  [true, false].forEach(function (intScale) {
+    w.Game.settings.integerScale = intScale;
+    w.dispatchEvent(new w.Event('resize'));
+    w.Game.__step(1 / 60);
+    var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+    say('');
+    say((intScale ? '【整数缩放 开】' : '【整数缩放 关】') + ' canvas ' + r.width.toFixed(2) + 'x' + r.height.toFixed(2) +
+        '  scale x' + (r.width / W).toFixed(5) + ' y' + (r.height / H).toFixed(5));
+    if (!enterExplore(w, G)) { say('  进不了探索'); return; }
+    var ex = { x: W - 132, y: H - 32, w: 124, h: 22 };
+    /* 按钮左下角往里 1px 的一个点：最容易被"边界取整"弄丢的位置 */
+    var tx = ex.x + 1, ty = ex.y + ex.h - 1;
+    var c2 = w.document.getElementById('screen').getBoundingClientRect();
+    var cl = { x: c2.left + tx * (c2.width / W), y: c2.top + ty * (c2.height / H) };
+    var back = virtualOf(w, cl.x, cl.y);
+    say('  目标虚拟点 (' + tx + ',' + ty + ') → 客户端 (' + cl.x.toFixed(2) + ',' + cl.y.toFixed(2) + ')' +
+        ' → 引擎换算回 (' + back.vx + ',' + back.vy + ')' +
+        (back.vx === tx && back.vy === ty ? '  ✓ 往返一致' : '  ✗ 往返偏了'));
+    var res = [];
+    [['精确', 0, 0], ['左1px', -1, 0], ['右1px', 1, 0], ['上1px', 0, -1], ['下1px', 0, 1]].forEach(function (p) {
+      if (!enterExplore(w, G)) { res.push(p[0] + '=?'); return; }
+      var hit = clickAt(w, tx, ty, p[1], p[2]);
+      res.push(p[0] + '=' + (hit ? '中' : '不中'));
+    });
+    say('  按钮内边缘点 (±1px)：' + res.join('  '));
+  });
+  document.title = 'DONE';
+  window.__autoDone = true;
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>

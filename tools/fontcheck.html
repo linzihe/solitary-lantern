@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>字体对比</title>
+<style>body{margin:0;background:#06050d}canvas{image-rendering:pixelated;display:block}</style></head>
+<body><canvas id="c" width="480" height="270" style="width:1440px;height:810px"></canvas>
+<script src="../src/font-data.js"></script>
+<script src="../src/art.js"></script>
+<script>
+var c = document.getElementById('c').getContext('2d');
+c.fillStyle = '#0c0a1a'; c.fillRect(0, 0, 480, 270);
+var PF = Art.PixelFont;
+var S = '撇捺：鬱攥纂饕餮 威卡·独修者 「灯借你，路你自己走。」 魔法是自然的';
+function row(label, y) {
+  PF.draw(c, label, 6, y, 9, '#e0b545');
+  [9, 10, 11, 12, 14, 18].forEach(function (s, i) { PF.draw(c, s + 'px ' + S.slice(0, 22), 6, y + 12 + i * (s + 6), s, '#fff4d6'); });
+}
+row('旧：系统黑体二值化', 4);
+PF.load(FONT_DATA, function (ok) {
+  c.fillStyle = '#0c0a1a'; c.fillRect(240, 0, 240, 270);
+  c.save(); c.translate(240, 0);
+  row('新：Fusion Pixel ' + (ok ? '已载入' : '失败'), 4);
+  c.restore();
+  document.title = 'done ' + ok;
+});
+</script></body></html>

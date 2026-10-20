@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>save-check · 存档</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.6 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}.ok{color:#7fd18a}.bad{color:#ff7b7b}.warn{color:#e0b545}
+iframe{width:1px;height:1px;opacity:0;border:0}</style>
+</head>
+<body>
+<pre id="log">running…</pre>
+<div id="host"></div>
+<script>
+/* 存档验证：存档 → **真的重新加载一次页面** → 读档 → 逐项比对。
+   为什么必须"真重载"：同页面内 save→load 只是把同一个 G 对象再赋值一遍，
+   读档路径的 bug（偏一句、背景/立绘被场景默认值覆盖、字段漏存）根本不会暴露。
+   实现要点：用 document.write 把游戏写进一个 iframe（而不是 srcdoc）——
+   file:// 下 document.write 的子文档继承父页面的 origin，localStorage 才是同一份。
+   每次"重载"都换一个新的 iframe（旧 JS 上下文彻底丢弃）。 */
+var CONFIG = { target: '../index.html', slot: 'savecheck', chars: 260 };
+var log = document.getElementById('log');
+var out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+
+var xhr = new XMLHttpRequest();
+xhr.open('GET', CONFIG.target, false);
+xhr.send(null);
+var gameHtml = xhr.responseText;
+/* 无头下 FontFace 的 Promise 不落地，替换成同步回调（只影响字形，不影响存档字段） */
+var inject = '<script>window.requestAnimationFrame=function(){return 0;};</' + 'script>' +
+  '<script>addEventListener("DOMContentLoaded",function(){try{Art.PixelFont.load=function(f,d){d(false);};}catch(e){}});</' + 'script>';
+var pos = gameHtml.indexOf('<script src=');
+if (pos < 0) pos = gameHtml.indexOf('<script>');           // 单文件版：插在第一个脚本前
+gameHtml = gameHtml.slice(0, pos) + inject + gameHtml.slice(pos);
+
+function newPage(tag) {
+  var host = document.getElementById('host');
+  host.innerHTML = '';
+  var ifr = document.createElement('iframe');
+  ifr.id = 'game_' + tag;
+  host.appendChild(ifr);
+  var d = ifr.contentWindow.document;
+  d.open(); d.write(gameHtml); d.close();
+  return ifr;
+}
+function waitBoot(ifr, cb, tries) {
+  tries = tries || 0;
+  var w = ifr.contentWindow;
+  var ok = false;
+  try { ok = !!(w && w.__booted); } catch (e) {}
+  if (ok) { cb(w); return; }
+  if (tries > 600) { say('✗ 游戏没启动（重载后 __booted 未置位）', 'bad'); document.title = 'FAIL'; window.__autoDone = true; return; }
+  setTimeout(function () { waitBoot(ifr, cb, tries + 1); }, 50);
+}
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true })); }
+function snap(G) {
+  return {
+    scene: G.sceneId, pc: G.pc, mode: G.mode, bg: G.bg, bgm: G.bgm,
+    flags: JSON.stringify(G.flags), sigils: JSON.stringify(G.sigils.slice().sort()),
+    codex: JSON.stringify(Object.keys(G.codexSeen).sort()), rel: JSON.stringify(G.rel),
+    chapters: JSON.stringify(Object.keys(G.chapterDone).sort()), achv: JSON.stringify(Object.keys(G.achv).sort()),
+    insight: G.insight, journals: JSON.stringify(Object.keys(G.journals).sort()),
+    dlg: G.dlg ? (G.dlg.kind + ':' + String(G.dlg.text).slice(0, 20)) : ''
+  };
+}
+function diff(a, b) {
+  var out2 = [];
+  Object.keys(a).forEach(function (k) { if (String(a[k]) !== String(b[k])) out2.push(k + '：存档 ' + a[k] + ' ≠ 读回 ' + b[k]); });
+  return out2;
+}
+
+var saved = null, bad = 0;
+say('目标：' + CONFIG.target + '（' + gameHtml.length + ' 字符）');
+var page1 = newPage('a');
+waitBoot(page1, function (w) {
+  var bad0 = 0;
+  try {
+    w.localStorage.clear();
+    w.Game.newGame();
+    for (var i = 0; i < 60; i++) w.Game.__step(1 / 60);
+    /* 往前走：推进对白 / 过探索点 / 做试炼，攒出非平凡状态 */
+    var G = w.Game.G, guard = 0;
+    while (guard++ < CONFIG.chars) {
+      if (G.mode === 'ending') break;
+      if (G.mode === 'page') { key(w, 'Enter'); }
+      else if (G.mode === 'scene' && G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+      else if (G.mode === 'scene') { w.Game.__step(1 / 60); }
+      else if (G.mode === 'choice') { key(w, 'Enter'); }
+      else if (G.mode === 'explore') {
+        var e = G.explore, nx = -1;
+        for (var q = 0; q < e.spots.length; q++) if (!e.seen[e.spots[q].id]) { nx = q; break; }
+        if (nx >= 0) { e.sel = nx; key(w, 'Enter'); } else { e.exitHot = true; key(w, 'Enter'); }
+      } else if (G.mode === 'trial') { w.UI.Trial.autoStep(0, function () { return 0.99; }); }
+      w.Game.__step(1 / 60);
+    }
+    saved = snap(G);
+    say('推进 ' + guard + ' 步；存档点：场景 ' + saved.scene + ' pc=' + saved.pc + ' 符印 ' + G.sigils.length +
+        ' 图鉴 ' + Object.keys(G.codexSeen).length + ' 章节 ' + Object.keys(G.chapterDone).join(',') +
+        ' 关系 ' + JSON.stringify(G.rel));
+    var wrote = w.Game.save(CONFIG.slot);
+    say(wrote ? '✓ 写档成功（slot=' + CONFIG.slot + '）' : '✗ 写档失败', wrote ? 'ok' : 'bad');
+    if (!wrote) { bad0++; }
+    /* 写档后不要动存档；直接丢掉这一页 */
+    var raw = w.localStorage.getItem('solitary_lantern_save_' + CONFIG.slot);
+    say(raw ? '  localStorage 里 ' + raw.length + ' 字节' : '  ✗ localStorage 里没有这一档', raw ? 'ok' : 'bad');
+    if (!raw) bad0++;
+  } catch (e) { say('第一阶段异常：' + e.message, 'bad'); bad0++; }
+
+  say('');
+  say('—— 丢弃整个文档，重新加载一次 ——');
+  var page2 = newPage('b');
+  waitBoot(page2, function (w2) {
+    try {
+      var G2 = w2.Game.G;
+      var info = w2.Game.slotInfo(CONFIG.slot);
+      say('slot 信息：' + (info ? JSON.stringify(info) : '空'));
+      var okLoad = w2.Game.loadGame(CONFIG.slot);
+      say(okLoad ? '✓ 读档成功' : '✗ 读档失败', okLoad ? 'ok' : 'bad');
+      if (!okLoad) bad0++;
+      var back = snap(G2);
+      var d = diff(saved, back);
+      if (!d.length) say('✓ 逐项一致：场景 / pc / 背景 / 音乐 / 旗标 / 符印 / 图鉴 / 关系 / 章节 / 成就 / 悟性 / 日记 / 当前台词', 'ok');
+      else { d.forEach(function (x) { say('  ✗ ' + x, 'bad'); }); bad0 += d.length; }
+      /* 读档后还能继续走（不是"读进来就卡住"） */
+      var before = G2.pc + '|' + G2.sceneId + '|' + G2.mode;
+      say('  读档后初始：' + before + ' dlg=' + (G2.dlg ? (G2.dlg.kind + ' reveal=' + G2.dlg.reveal) : 'null'));
+      for (var k = 0; k < 30; k++) {
+        if (G2.mode === 'scene' && G2.dlg) { G2.dlg.shown = G2.dlg.text.length; key(w2, 'Enter'); }
+        else if (G2.mode === 'quote') { key(w2, 'Enter'); }
+        else if (G2.mode === 'page') { key(w2, 'Enter'); }
+        else w2.Game.__step(1 / 60);
+        if (k % 5 === 0 || k === 29) say('    k=' + k + ' mode=' + G2.mode + ' pc=' + G2.pc + ' scene=' + G2.sceneId +
+          ' dlg=' + (G2.dlg ? G2.dlg.kind : 'null'));
+      }
+      var after = G2.pc + '|' + G2.sceneId + '|' + G2.mode;
+      if (before !== after) say('✓ 读档后剧本能继续推进（' + before + ' → ' + after + '）', 'ok');
+      else { say('  ✗ 读档后原地不动：' + before, 'bad'); bad0++; }
+    } catch (e) { say('第二阶段异常：' + e.message, 'bad'); bad0++; }
+    bad = bad0;
+    say(bad ? ('===== 失败：' + bad + ' 项 =====') : '===== 通过 =====');
+    document.title = bad ? 'FAIL' : 'PASS';
+    window.__autoDone = true;
+  });
+});
+(function waitDone() { if (!window.__autoDone) setTimeout(waitDone, 200); })();
+</script>
+</body>
+</html>

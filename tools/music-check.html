@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>music-check</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.6 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}.ok{color:#7fd18a}.bad{color:#ff7b7b}.warn{color:#e0b545}</style>
+</head>
+<body>
+<pre id="log">running…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:900px;height:520px;border:1px solid #333;visibility:hidden"></iframe>
+<script>
+/* 验证外部配乐层：music/ 里的文件能不能被探测到、能不能被播放。
+   直接把游戏页放进 iframe（同一套源码 + 旁边的 music/ 文件夹），
+   这样相对路径 music/title.mp3 才能按 file:// 的方式解析。 */
+var CONFIG = { expect: ['title'] };
+var log = document.getElementById('log');
+var out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var iframe = document.getElementById('f');
+var started = false, ticks = 0;
+(function poll() {
+  ticks++;
+  var w = null, ok = false;
+  try { w = iframe.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (ok && !started) {
+    started = true;
+    var M = w.Music;
+    if (!M) { say('✗ 页面里没有 Music 模块', 'bad'); done(1); return; }
+    say('Music 模块已加载');
+    M.detect().then(function (found) {
+      var names = Object.keys(found || {});
+      say('探测到 ' + names.length + ' 首外部配乐：' + (names.join(', ') || '（无）'));
+      var bad = 0;
+      CONFIG.expect.forEach(function (nm) {
+        if (found[nm]) say('  ✓ ' + nm + ' → music/' + nm + '.' + found[nm], 'ok');
+        else { say('  ✗ 没探测到 ' + nm, 'bad'); bad++; }
+      });
+      if (!names.length) say('· 没找到外部配乐，游戏继续用内置合成曲（允许的降级）', 'warn');
+      var played = M.play('title');
+      say('Music.play("title") = ' + played);
+      setTimeout(function () {
+        say('Music.current() = ' + M.current() + '  currentTime=' + M.currentTime().toFixed(2) + 's');
+        var G = w.Game.G;
+        say('游戏侧：G.bgm=' + G.bgm + '  场景数=' + Object.keys(w.STORY.scenes).length);
+        /* 触发一次手势，看 unlock 后会不会自动起播（无头下 play() 多半被策略拒绝，属正常） */
+        w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        setTimeout(function () { say('手势后 Music.current() = ' + M.current()); done(bad); }, 600);
+      }, 1200);
+    }, function (e) { say('detect 失败：' + e.message, 'bad'); done(1); });
+    return;
+  }
+  if (ticks > 600) { say('✗ 游戏没启动（__booted 未置位）', 'bad'); done(1); return; }
+  setTimeout(poll, 100);
+})();
+function done(bad) {
+  say(bad ? ('===== 失败：' + bad + ' 项 =====') : '===== 通过 =====');
+  document.title = bad ? 'FAIL' : 'PASS';
+  window.__autoDone = true;
+}
+(function waitDone() { if (!window.__autoDone) setTimeout(waitDone, 200); })();
+</script>
+</body>
+</html>

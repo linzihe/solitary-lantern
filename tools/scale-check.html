@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>scale-check</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.5 Consolas,monospace;margin:0;padding:8px}pre{margin:0;white-space:pre-wrap}</style></head>
+<body>
+<pre id="log">scale-check…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:1200px;height:760px;border:1px solid #333"></iframe>
+<script>
+/* 对比"整数缩放 开 / 关"两种情况下：
+   canvas 的 CSS 尺寸、toVirtual 的换算、以及点按钮是否命中。 */
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var W = 480, H = 270, fr = document.getElementById('f');
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+function info(w) {
+  var c = w.document.getElementById('screen');
+  var r = c.getBoundingClientRect();
+  var dpr = w.devicePixelRatio || 1;
+  return {
+    css: +r.width.toFixed(3) + 'x' + +r.height.toFixed(3),
+    left: +r.left.toFixed(2), top: +r.top.toFixed(2),
+    scaleX: +(r.width / W).toFixed(5), scaleY: +(r.height / H).toFixed(5),
+    dpr: dpr, styleW: c.style.width, styleH: c.style.height,
+    inner: w.innerWidth + 'x' + w.innerHeight
+  };
+}
+function clickV(w, vx, vy) {
+  var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+  var sx = r.width / W, sy = r.height / H;
+  c.dispatchEvent(new w.MouseEvent('mousedown', {
+    clientX: r.left + vx * sx, clientY: r.top + vy * sy, bubbles: true, cancelable: true
+  }));
+}
+function enterExplore(w, G) {
+  w.Game.newGame();
+  for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+  for (var n = 0; n < 900 && G.mode !== 'explore'; n++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    else if (G.mode === 'page') key(w, 'Enter');
+    w.Game.__step(1 / 60);
+  }
+  if (G.mode !== 'explore') return false;
+  var need = G.explore.def.need || G.explore.spots.length;
+  for (var s = 0; s < need; s++) { G.explore.seen[G.explore.spots[s].id] = 1; }
+  w.Game.__step(1 / 60);
+  return true;
+}
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 80); return; }
+  var G = w.Game.G;
+  [true, false].forEach(function (intScale) {
+    w.Game.settings.integerScale = intScale;
+    /* 触发一次 resize，让设置生效 */
+    w.dispatchEvent(new w.Event('resize'));
+    w.Game.__step(1 / 60);
+    var inf = info(w);
+    say('');
+    say((intScale ? '【整数缩放 开】' : '【整数缩放 关】') + '  canvas CSS=' + inf.css +
+        '  left=' + inf.left + ' top=' + inf.top + '  scaleX=' + inf.scaleX + ' scaleY=' + inf.scaleY +
+        '  dpr=' + inf.dpr + '  style=' + inf.styleW + 'x' + inf.styleH + '  inner=' + inf.inner);
+    if (!enterExplore(w, G)) { say('  进不了探索'); return; }
+    if (!G.explore.exitHot && G.explore) G.explore.exitHot = false;
+    var R = { x: W - 132, y: H - 32, w: 124, h: 22 };
+    var cx = R.x + R.w / 2, cy = R.y + R.h / 2;
+    /* 先移鼠标建立 hover，再点 */
+    var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+    var sx = r.width / W, sy = r.height / H;
+    c.dispatchEvent(new w.MouseEvent('mousemove', { clientX: r.left + cx * sx, clientY: r.top + cy * sy, bubbles: true }));
+    w.Game.__step(1 / 60);
+    say('  按钮中心虚拟坐标 (' + cx + ',' + cy + ')  经过 mousemove 后 exitHot=' + (G.explore ? G.explore.exitHot : 'n/a'));
+    var before = G.mode;
+    clickV(w, cx, cy);
+    w.Game.__step(1 / 60); w.Game.__step(1 / 60);
+    say('  点击后：' + before + ' → ' + G.mode + (G.mode !== 'explore' ? '   ✓ 命中' : '   ✗ 没命中'));
+  });
+  document.title = 'DONE';
+  window.__autoDone = true;
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>

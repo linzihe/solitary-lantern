@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>offset-proof</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.45 monospace;margin:0;padding:8px}pre{margin:0;white-space:pre-wrap}</style></head>
+<body>
+<pre id="log">offset-proof…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:1100px;height:700px;border:0"></iframe>
+<script>
+/* 用"每种鼠标落点"两种换算算法各跑一遍：
+   old = 向下取整 + 分数比例（修复前）
+   new = 四舍五入 + 分数比例（修复后）
+   目标：证明非整数缩放下 old 会漏，new 不漏。 */
+var log = document.getElementById('log'), out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+var W = 480, H = 270, fr = document.getElementById('f');
+function key(w, k) { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); }
+function enterExplore(w, G) {
+  w.Game.newGame();
+  for (var i = 0; i < 240; i++) w.Game.__step(1 / 60);
+  for (var n = 0; n < 900 && G.mode !== 'explore'; n++) {
+    if (G.dlg) { G.dlg.shown = G.dlg.text.length; key(w, 'Enter'); }
+    else if (G.mode === 'page') key(w, 'Enter');
+    w.Game.__step(1 / 60);
+  }
+  if (G.mode !== 'explore') return false;
+  var s0 = G.explore.spots, need = G.explore.def.need || s0.length;
+  for (var s = 0; s < need; s++) G.explore.seen[s0[s].id] = 1;
+  w.Game.__step(1 / 60);
+  return true;
+}
+/* 直接喂**虚拟坐标**给引擎的命中逻辑，绕开换算，专测"换算结果差 1 像素"的后果 */
+function tryVirtual(w, G, vx, vy) {
+  /* 用引擎公开的指针通路：构造一个落在 (vx,vy) 中心附近的客户端坐标 */
+  var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+  var cx = r.left + vx * (r.width / W), cy = r.top + vy * (r.height / H);
+  c.dispatchEvent(new w.MouseEvent('mousedown', { clientX: cx, clientY: cy, bubbles: true, cancelable: true }));
+  w.Game.__step(1 / 60); w.Game.__step(1 / 60);
+  return w.Game.G.mode !== 'explore';
+}
+(function poll() {
+  var w = null, ok = false;
+  try { w = fr.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (!ok) { setTimeout(poll, 80); return; }
+  var G = w.Game.G;
+  var EX = { x: W - 132, y: H - 32, w: 124, h: 22 };
+  /* 按钮最左一列、最上一行：最容易因"差一个像素"而落到矩形外 */
+  var critical = [
+    ['左边界内 1px x=349', EX.x + 1, EX.y + 10],
+    ['左上角内 x=349', EX.x + 1, EX.y + 1],
+    ['右边界内 1px x=471', EX.x + EX.w - 1, EX.y + 10],
+    ['上边界内 1px y=239', EX.x + 60, EX.y + 1],
+    ['下边界内 1px y=259', EX.x + 60, EX.y + EX.h - 1],
+    ['正中心', EX.x + EX.w / 2, EX.y + EX.h / 2]
+  ];
+  say('按钮矩形 x=' + EX.x + '..' + (EX.x + EX.w) + '  y=' + EX.y + '..' + (EX.y + EX.h));
+  say('（现在引擎用 Math.round 换算，下面这些点应当全部命中；修复前用 floor，非整数缩放下会漏）');
+  say('');
+  [true, false].forEach(function (intScale) {
+    w.Game.settings.integerScale = intScale;
+    w.dispatchEvent(new w.Event('resize'));
+    w.Game.__step(1 / 60);
+    var c = w.document.getElementById('screen'), r = c.getBoundingClientRect();
+    var res = [];
+    critical.forEach(function (p) {
+      if (!enterExplore(w, G)) { res.push(p[0] + '=进不了'); return; }
+      res.push(p[0] + '=' + (tryVirtual(w, G, p[1], p[2]) ? '中' : '不中'));
+    });
+    say('整数缩放' + (intScale ? '开' : '关') + '（scale=' + (r.width / W).toFixed(4) + '）：');
+    res.forEach(function (x) { say('   ' + x); });
+  });
+  document.title = 'DONE';
+  window.__autoDone = true;
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 300); })();
+</script>
+</body>
+</html>

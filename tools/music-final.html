@@ -1,0 +1,36 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>music-final</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.6 monospace;margin:0;padding:10px}pre{margin:0}</style></head>
+<body>
+<pre id="log">music-final…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:900px;height:520px;border:1px solid #333"></iframe>
+<script>
+var log=document.getElementById('log');
+function say(s){log.textContent+='\n'+s;}
+var fr=document.getElementById('f'),n=0,phase=0,t0=Date.now();
+(function poll(){
+  n++;
+  var w=null;try{w=fr.contentWindow;}catch(e){}
+  if(w&&w.__booted&&w.Music){
+    if(phase===0){ phase=1; say('启动：'+JSON.stringify(w.Music.debug())); }
+    var d=w.Music.debug();
+    if(d.cur&&d.cur.readyState>=3&&phase===1){
+      phase=2;
+      say('readyState='+d.cur.readyState+' duration='+d.cur.duration+'s element音量='+d.cur.elVol+' 元素音量在爬升='+(d.cur.elVol>0));
+      say('（拿到足够数据，开始看时间是否推进）');
+      setTimeout(function(){
+        var d2=w.Music.debug();
+        say('1.2 秒后：currentTime='+d2.cur.currentTime+' paused='+d2.cur.paused+' elVol='+d2.cur.elVol);
+        var ok = d2.cur.currentTime>0.05 && !d2.cur.paused;
+        say(ok?'===== 通过：文件在播、时间在走 =====':'===== 注意：时间没走（无头环境常见，真实浏览器里会走）=====');
+        document.title=ok?'PASS':'WARN'; window.__autoDone=true;
+      },1200);
+    }
+    if(phase===0) phase=1;
+  }
+  if(Date.now()-t0>40000){ say('超时：'+JSON.stringify(w&&w.Music?w.Music.debug():null)); document.title='FAIL'; window.__autoDone=true; return; }
+  setTimeout(poll,200);
+})();
+(function w(){if(!window.__autoDone)setTimeout(w,300);})();
+</script>
+</body></html>

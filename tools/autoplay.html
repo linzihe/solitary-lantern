@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>autoplay · 自动通关</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.6 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}.ok{color:#7fd18a}.bad{color:#ff7b7b}.warn{color:#e0b545}</style>
+</head>
+<body>
+<iframe id="f" style="width:960px;height:540px;border:1px solid #333;visibility:hidden"></iframe>
+<pre id="log">running…</pre>
+<script>
+/* 自动通关 harness：把 dist/index.html 读进 iframe，用真实键盘事件驱动引擎走完全部场景与试炼。
+ * 断言：window.onerror 数为 0；全部试炼都被走到；记录到过的场景序列。 */
+var CONFIG = {
+  target: '../dist/index.html',
+  passes: 2,               // pass 0 一路选第一个选项，pass 1 一路选最后一个选项（覆盖分支）
+  maxFrames: 60000,
+  idleLimit: 240,          // 连续多少帧状态没变化就判定卡死
+  errorRate: 0,            // 试炼故意选错的概率（0 = 全部做对）
+  diagnose: true           // 打印状态采样，便于诊断"不前进"
+};
+var log = document.getElementById('log');
+var out = [];
+var passResults = [];
+function say(s, cls) { out.push(s); log.textContent = out.join('\n'); }
+
+(function run() {
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', CONFIG.target, false);
+  try { xhr.send(null); } catch (e) { say('读取 ' + CONFIG.target + ' 失败：' + e.message, 'bad'); return; }
+  var html = xhr.responseText;
+  /* 无头 + 虚拟时间下 FontFace.load() 的 Promise 不会落地，启动就永远等不到。
+     在 art.js 之前插一段同步 stub，把 PixelFont.load 换成同步回调（退回系统字体路径）。
+     注意：这里不能出现字面量 "</" + "script>"，否则 HTML 解析器会就地结束本脚本块。 */
+  var inject = '<script>window.requestAnimationFrame=function(){return 0;};</' + 'script>' +
+    '<script>addEventListener("DOMContentLoaded",function(){' +
+    'try{Art.PixelFont.load=function(f,d){window.__fontStubbed=1;d(false);};}catch(e){window.__stubErr=String(e);}' +
+    '});</' + 'script>';
+  var firstScript = html.indexOf('<script src=');
+  if (firstScript >= 0) html = html.slice(0, firstScript) + inject + html.slice(firstScript);
+  else html = html.replace('<head>', '<head>' + inject);
+  var iframe = document.getElementById('f');
+  var started = false;
+
+  /* 不用 onload：srcdoc 的 load 事件在无头下不一定按我们要的时机来。
+     直接轮询 iframe 里的 __booted，起来了就开始跑。 */
+  var waited = 0;
+  (function poll() {
+    var w = null, booted = false;
+    try { w = iframe.contentWindow; booted = !!(w && w.__booted); } catch (e) {}
+    if (booted) { if (!started) { started = true; wrapErrors(w); go(w); } return; }
+    waited += 100;
+    if (waited > 30000) { say('游戏没启动（30s 虚拟时间内 __booted 未置位）', 'bad'); document.title = 'FAIL'; window.__autoDone = true; return; }
+    setTimeout(poll, 100);
+  })();
+  iframe.srcdoc = html;
+})();
+
+function go(w) {
+  var Game = w.Game, STORY = w.STORY;
+  try { w.localStorage.clear(); } catch (e) {}
+  for (var p = 0; p < CONFIG.passes; p++) passResults.push(playPass(w, Game, STORY, p));
+  report(w, Game, STORY);
+}
+/* 游戏页的 window.onerror 统计：包一层，计数不改变原生行为 */
+function wrapErrors(w) {
+  w.__errCount = 0;
+  w.addEventListener('error', function () { w.__errCount++; });
+}
+
+function key(w, k) {
+  w.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+}
+function step(w, n, dt) {
+  var G = w.Game.G;
+  /* 呼吸试炼一个周期就是 inhale+hold+exhale 好几秒；用 1/60 的步长跑，
+     一个试炼要几万帧。无头测试按更大的 dt 推进（只影响时长，不影响判定）。 */
+  var d = (G && G.mode === 'trial' && w.UI.Trial.state && w.UI.Trial.state.kind === 'breath') ? 0.25 : (dt || 1 / 60);
+  for (var i = 0; i < (n || 1); i++) w.Game.__step(d);
+}
+
+function playPass(w, Game, STORY, p) {
+  var G = Game.G;
+  // 开新档：标题 → 新游戏
+  Game.newGame();
+  step(w, 2);
+  var visited = {}, trialsSeen = {}, pagesSeen = {}, choices = [], stuck = 0, frames = 0, last = '';
+  var errors = [];
+  var hist = {}, histOrder = [], ring = [], lastTb = -1;
+  while (frames < CONFIG.maxFrames) {
+    frames++;
+    var st;
+    try { st = (G.mode || '?') + '|' + (G.sceneId || '') + '|' + (G.pc || 0) + '|' + (G.trial ? (G.trial.id || '') : '') + '|' + Math.round((G.dlg ? G.dlg.shown : 0)); }
+    catch (e) { st = 'ERR:' + e.message; }
+    if (st === last) stuck++; else { stuck = 0; last = st; }
+    /* 呼吸这类"进度很慢但一直在动"的玩法：只要试炼计时器还在走，就不算卡死 */
+    var T0 = w.UI && w.UI.Trial && w.UI.Trial.state;
+    var tb = T0 ? Math.round((T0.bt || 0) * 4) : -1;
+    if (tb !== lastTb) { stuck = 0; lastTb = tb; }
+    if (stuck > CONFIG.idleLimit) { errors.push('卡死在 ' + st + '｜最后 12 帧：' + ring.slice(-12).join(' >> ')); break; }
+    if (G.sceneId) visited[G.sceneId] = (visited[G.sceneId] || 0) + 1;
+    // 状态采样：诊断"不前进"时到底卡在哪一步
+    try {
+      var stepT = '';
+      if (G.scene && G.scene.script && G.scene.script[G.pc]) {
+        var it = G.scene.script[G.pc];
+        stepT = it.t + (it.id ? ':' + it.id : '') + (it.name ? ':' + it.name : '');
+      }
+      var tr = w.UI && w.UI.Trial && w.UI.Trial.state;
+      var trialInfo = G.trial ? (G.trial.id + ' phase=' + (tr ? tr.phase : '-') +
+        (tr && tr.kind === 'breath' ? ' bt=' + (tr.bt || 0).toFixed(2) + ' started=' + (tr.started ? 1 : 0) + ' hold=' + (tr.holding ? 1 : 0) + ' cur=' + (tr.cur ? tr.cur.k : '-') : '') +
+        (tr && tr.kind === 'order' ? ' done=' + (tr.done ? tr.done.length : '?') + ' pool=' + (tr.shuffled ? tr.shuffled.length : '?') : '') +
+        (tr && (tr.kind === 'sort' || tr.kind === 'quiz') ? ' qi=' + tr.qi + '/' + tr.total : '')) : '';
+      var hk = (G.mode || '?') + ' pc=' + (G.pc || 0) + ' step=' + stepT +
+               ' dlg=' + (G.dlg ? ('"' + String(G.dlg.text || '').slice(0, 18) + '" len=' + String(G.dlg.text || '').length + ' shown=' + Math.round(G.dlg.shown)) : '-') +
+               ' page=' + (G.page ? G.page.kind + ':' + Math.round(G.page.shown) + '/' + (G.page.lines || []).length : '-') +
+               ' exp=' + (G.explore ? (G.explore.def.id + ' seen=' + Object.keys(G.explore.seen).length + '/' + G.explore.spots.length) : '-') +
+               ' trial=' + (trialInfo || '-') +
+               ' fx=' + (G.fx ? G.fx.kind : '-') + ' card=' + (G.chapterCard ? 1 : 0) + ' trans=' + (G.transition > 0 ? 1 : 0);
+      if (!hist[hk]) { hist[hk] = 0; histOrder.push(hk); }
+      hist[hk]++;
+      ring.push(hk); if (ring.length > 80) ring.shift();
+    } catch (e) {}
+    try {
+      if (G.mode === 'page') {
+        key(w, 'Enter'); step(w, 1);
+      } else if (G.mode === 'scene') {
+        if (G.dlg) {
+          G.dlg.shown = G.dlg.text ? G.dlg.text.length : 0;
+          key(w, 'Enter'); step(w, 1);
+        } else { step(w, 2); }        // 章节卡 / 特效 / wait，等它自己走完
+      } else if (G.mode === 'choice') {
+        var n = (G.choice && G.choice.options) ? G.choice.options.length : 1;
+        var idx = p === 0 ? 0 : n - 1;
+        if (G.choice.index !== idx) { G.choice.index = idx; }
+        else { choices.push(G.choice.prompt + ' → ' + (G.choice.options[idx] || {}).text); key(w, 'Enter'); }
+        step(w, 1);
+      } else if (G.mode === 'explore') {
+        // 先点没看过的点，全看完再退出
+        var e = G.explore, next = -1;
+        for (var i = 0; i < e.spots.length; i++) if (!e.seen || !e.seen[e.spots[i].id]) { next = i; break; }
+        if (next >= 0) { e.sel = next; key(w, 'Enter'); step(w, 1); }
+        else { e.exitHot = true; key(w, 'Enter'); step(w, 1); }
+      } else if (G.mode === 'trial') {
+        var tid = (G.trial && G.trial.id) || (w.UI.Trial.def ? w.UI.Trial.def.title : '?');
+        trialsSeen[tid] = (trialsSeen[tid] || 0) + 1;
+        w.UI.Trial.autoStep(CONFIG.errorRate, function () { return 0.99; });
+        step(w, 1);
+      } else if (G.mode === 'intro' || G.mode === 'journal' || G.mode === 'page') {
+        key(w, 'Enter'); step(w, 1);
+      } else if (G.mode === 'ending') {
+        break;
+      } else {
+        key(w, 'Enter'); step(w, 1);
+      }
+    } catch (e) {
+      errors.push('第 ' + frames + ' 帧 ' + (G.mode || '?') + ' 抛异常: ' + (e && e.message));
+      if (errors.length > 8) break;
+    }
+  }
+  return { pass: p, frames: frames, visited: visited, trials: trialsSeen, choices: choices, errors: errors, mode: G.mode, G: G, hist: hist, histOrder: histOrder };
+}
+
+function report(w, Game, STORY) {
+  var bad = 0;
+  say('===== 自动通关 =====');
+  var totalTrials = Object.keys(STORY.trials).length;
+  var allVisited = {};
+  var allTrials = {};
+  for (var i = 0; i < passResults.length; i++) {
+    var r = passResults[i];
+    say('pass ' + r.pass + '：' + r.frames + ' 帧，结束 mode=' + r.mode + '，到过 ' + Object.keys(r.visited).length + ' 个场景，试炼触发 ' + Object.keys(r.trials).length + ' 个，选择 ' + r.choices.length + ' 次');
+    for (var k in r.visited) allVisited[k] = 1;
+    for (var t in r.trials) allTrials[t] = 1;
+    for (var e = 0; e < r.errors.length; e++) { say('  ✗ ' + r.errors[e], 'bad'); bad++; }
+    if (CONFIG.diagnose) {
+      say('  · 状态采样（按出现顺序，次数）:');
+      for (var hi = 0; hi < r.histOrder.length && hi < 40; hi++) say('      ' + r.hist[r.histOrder[hi]] + ' × ' + r.histOrder[hi]);
+    }
+  }
+  var missedTrials = Object.keys(STORY.trials).filter(function (id) { return !allTrials[id]; });
+  var missedScenes = Object.keys(STORY.scenes).filter(function (id) { return !allVisited[id]; });
+  if (missedTrials.length) { say('✗ 没被走到的试炼：' + missedTrials.join(' '), 'bad'); bad++; } else say('✓ 全部 ' + totalTrials + ' 个试炼都被走到', 'ok');
+  if (missedScenes.length) say('· 本轮未到过的场景（可能是另一条分支）：' + missedScenes.join(' '), 'warn');
+  var errs = w.__errCount || 0;
+  say('window.onerror 捕获数：' + errs, errs ? 'bad' : 'ok');
+  if (errs) bad++;
+  var G = passResults[passResults.length - 1].G;
+  say('末态：mode=' + G.mode + ' 符印 ' + G.sigils.length + '/' + Object.keys(STORY.sigils).length +
+      ' 图鉴 ' + Object.keys(G.codexSeen).length + '/' + Object.keys(STORY.codex).length +
+      ' 章节完成 ' + Object.keys(G.chapterDone).join(','));
+  say(bad ? ('===== 失败：' + bad + ' 项 =====') : '===== 通过 =====', bad ? 'bad' : 'ok');
+  document.title = bad ? 'FAIL' : 'PASS';
+  window.__autoDone = true;          // 供外部（--dump-dom 前）轮询
+}
+window.addEventListener('error', function (e) { say('harness 异常：' + e.message, 'bad'); });
+
+/* 收尾：把 __autoDone 标志标出来；--dump-dom 在虚拟时间预算耗尽后抓取，
+   那时候所有定时器都已经跑完了。 */
+(function waitDone() {
+  if (window.__autoDone) return;
+  setTimeout(waitDone, 200);
+})();
+</script>
+</body>
+</html>

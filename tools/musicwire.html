@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>musicwire</title></head>
+<body>
+<pre id="log">musicwire…</pre>
+<script>
+/* 三种接线方式对照，找出哪种在 file:// 下能真正加载并走时间 */
+var log = document.getElementById('log');
+function say(s) { log.textContent += '\n' + s; }
+var URL_ = 'file:///D:/下载/pixel-wicca-v2/music/title.mp3';
+
+function trial(tag, wire) {
+  var a = new Audio();
+  a.preload = 'auto';
+  a.loop = false;
+  var rec = { tag: tag };
+  try { wire(a, function (k, v) { rec[k] = v; }); } catch (e) { rec.err = e.message; }
+  if (!rec.srcSet) a.src = URL_;
+  a.play().then(function () { rec.play = 'ok'; }, function (e) { rec.play = 'rejected:' + e.name; });
+  return rec;
+}
+var results = [];
+var ctx = new (window.AudioContext || window.webkitAudioContext)();
+say('AudioContext state=' + ctx.state);
+try { ctx.resume(); } catch (e) {}
+
+results.push(trial('A 裸 audio（不接图）', function (a) { }));
+
+results.push(trial('B 先建 MediaElementSource 再设 src', function (a) {
+  var g = ctx.createGain(); g.gain.value = 0.9;
+  var src = ctx.createMediaElementSource(a);
+  src.connect(g); g.connect(ctx.destination);
+}));
+
+results.push(trial('C 先设 src 再建 MediaElementSource', function (a, set) {
+  a.src = URL_; set('srcSet', 1);
+  var g = ctx.createGain(); g.gain.value = 0.9;
+  var src = ctx.createMediaElementSource(a);
+  src.connect(g); g.connect(ctx.destination);
+}));
+
+setTimeout(function () {
+  say('2 秒后：');
+  results.forEach(function (r) {
+    say('  ' + r.tag + '  play=' + r.play + ' err=' + (r.err || '-'));
+  });
+  document.title = 'DONE';
+}, 2000);
+(function w() { if (document.title !== 'DONE') setTimeout(w, 300); })();
+</script>
+</body>
+</html>

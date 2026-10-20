@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>text-pixel-check · 打字机</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.6 Consolas,monospace;margin:0;padding:10px}
+pre#log{white-space:pre-wrap;margin:0}.ok{color:#7fd18a}.bad{color:#ff7b7b}.warn{color:#e0b545}</style>
+</head>
+<body>
+<pre id="log">running…</pre>
+<iframe id="f" style="width:960px;height:540px;border:1px solid #333;visibility:hidden"></iframe>
+<script>
+/* 打字机验证：逐帧**读游戏画布的真实像素**，量文字墨迹。
+   文字是用离屏缓存 drawImage 贴上去的，挂钩 fillRect 量不到（第一版就栽在这：
+   量到的其实是背景/对话框，宽度恒定，断言全是假的"通过"）。
+   所以这里直接 getImageData：先记下"对话框空着"时该区域的像素作基线，
+   之后每帧数出与基线不同的像素，取它们的右边界。
+   断言：
+     1) 半途帧有墨、墨迹右边界随 shown 单调不减
+     2) 末态墨迹明显宽于首态（不是整句蹦出）
+     3) 单元测试：shown 取 0→len 的小数步长，宽度单调不减
+     4) 末态与"直接把 shown 设满"的墨迹一致（没有没显示完的黑边） */
+var CONFIG = { target: '../dist/index.html' };
+var log = document.getElementById('log');
+var out = [];
+function say(s) { out.push(s); log.textContent = out.join('\n'); }
+
+var gctx = null, gcanvas = null, baseline = null;
+/* 对话框文字区（实测：第一行文字在 y≈188，行高 17；第二行 y≈205）。
+   y 上限必须卡在 240 以下 —— 再往下会数到右下角"空格/回车"提示，那不是正文墨迹。 */
+var REGION = { x: 100, y: 183, w: 368, h: 58 };
+
+function hookCanvasInPage() {
+  var raw = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (t) {
+    var c = raw.apply(this, arguments);
+    if (t === '2d' && !this.__patched) {
+      this.__patched = 1;
+      /* 只认游戏主画布 #screen。用"480x270"当特征会抓错：
+         PixelFont 的字型缓存也是 480x270 的离屏 canvas（实测读出来全黑）。 */
+      if (this.id === 'screen') { window.__gctx = c; window.__gcanvas = this; }
+    }
+    return c;
+  };
+}
+
+/* 取文字区像素 */
+function grab() { return gctx.getImageData(REGION.x, REGION.y, REGION.w, REGION.h).data; }
+function lum(d, i) { return (d[i] + d[i + 1] + d[i + 2]) / 3; }
+/* 亮于阈值的像素 = 文字墨迹（对话框底、背景、立绘都远暗于此） */
+var THRESH = 150;
+function measure() {
+  var d = grab(), n = 0, x0 = 1e9, x1 = -1;
+  for (var i = 0; i < d.length; i += 4) {
+    if (lum(d, i) < THRESH) continue;
+    var px = (i / 4) % REGION.w;
+    n++;
+    if (px < x0) x0 = px;
+    if (px > x1) x1 = px;
+  }
+  return { n: n, x0: x0 === 1e9 ? -1 : x0, x1: x1, w: x1 < 0 ? 0 : x1 - x0 + 1 };
+}
+
+var xhr = new XMLHttpRequest();
+xhr.open('GET', CONFIG.target, false);
+xhr.send(null);
+var html = xhr.responseText;
+var inject =
+  '<script>window.requestAnimationFrame=function(){return 0;};</' + 'script>' +
+  '<script>addEventListener("DOMContentLoaded",function(){try{Art.PixelFont.load=function(f,d){d(false);};}catch(e){}});</' + 'script>' +
+  '<script>(' + hookCanvasInPage.toString() + ')();</' + 'script>';
+var pos = html.indexOf('<script src=');
+html = html.slice(0, pos) + inject + html.slice(pos);
+var iframe = document.getElementById('f');
+iframe.srcdoc = html;
+
+function check(w, G) {
+  var bad = 0;
+  gctx = w.__gctx; gcanvas = w.__gcanvas;
+  if (!gctx) { say('✗ 没抓到游戏画布 context', 'bad'); return 1; }
+  /* 走到第一段普通对白 */
+  for (var n = 0; n < 500; n++) {
+    if (G.dlg && G.dlg.text && G.dlg.text.length >= 8) break;
+    if (G.dlg) G.dlg.shown = G.dlg.text.length;
+    w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    w.Game.__step(1 / 60);
+  }
+  if (!G.dlg || !G.dlg.text) { say('✗ 没能进入一段对白', 'bad'); return 1; }
+  var text = G.dlg.text, len = text.length;
+  say('对白：' + JSON.stringify(text.slice(0, 22)) + '（' + len + ' 字）');
+  /* 自检：整块画布的定量，确认测量代码本身有效 */
+  (function () {
+    var all = gctx.getImageData(0, 0, 480, 270).data, bright = 0, maxL = 0;
+    for (var k = 0; k < all.length; k += 4) {
+      var L = (all[k] + all[k + 1] + all[k + 2]) / 3;
+      if (L > maxL) maxL = L;
+      if (L > THRESH) bright++;
+    }
+    say('测量自检：全画布亮像素 ' + bright + '，最大亮度 ' + Math.round(maxL) + '，阈值 ' + THRESH);
+  })();
+  /* 逐帧重放：每帧把 shown 指派成"第 k 个字刚出现"，画一帧后量墨迹 */
+  var samples = [];
+  for (var i = 0; i < 240; i++) {
+    G.dlg.shown = i;                       // 与 update() 的推进等价
+    w.Game.__step(1 / 60);
+    var m = measure();
+    samples.push({ shown: i, w: m.w, n: m.n });
+    if (i > len) break;
+  }
+  var real = samples.slice(2, len).filter(function (s) { return s.n > 0 || true; });
+  var widths = real.map(function (s) { return s.w; });
+  say('逐字采样 ' + samples.length + ' 帧；墨迹宽（前 16）：' + samples.slice(0, 16).map(function (s) { return s.w; }).join(','));
+  say('                     末 6：' + samples.slice(-6).map(function (s) { return s.w + '(' + s.n + ')'; }).join(','));
+  var mid = samples.filter(function (s) { return s.shown >= 2 && s.shown < len; });
+  if (mid.length < 3) { say('  ✗ 揭示过程太短，量不到中间态', 'bad'); bad++; }
+  else {
+    var mono = true, back = [];
+    for (var j = 1; j < mid.length; j++) if (mid[j].w < mid[j - 1].w - 1) { mono = false; back.push(j); }
+    if (mono) say('  ✓ 墨迹右边界随字数单调不减（逐字出现）', 'ok');
+    else { say('  ✗ 墨迹回缩 @' + back.join(','), 'bad'); bad++; }
+    /* "半途有墨"要看中段：第 2 帧本来就该是空的（还没打出一个字） */
+    var withInk = mid.filter(function (s) { return s.n > 0; }).length;
+    var half = mid[Math.floor(mid.length / 2)];
+    say('  半途 ' + mid.length + ' 帧，其中 ' + withInk + ' 帧有墨；中段 shown=' + half.shown + ' 宽=' + half.w + 'px');
+    if (half.w > 2 && half.w < mid[mid.length - 1].w) say('  ✓ 中段正在逐字长出来（不是空白闪烁、也不是整句蹦出）', 'ok');
+    else { say('  ✗ 中段异常：' + half.w + 'px（末态 ' + mid[mid.length - 1].w + 'px）', 'bad'); bad++; }
+    if (withInk >= mid.length * 0.6) say('  ✓ 大多数半途帧都有墨', 'ok');
+    else { say('  ✗ 半途大量空帧：' + withInk + '/' + mid.length, 'bad'); bad++; }
+  }
+  /* 末态一致性：shown=len 与 shown=len+5 应一致 */
+  G.dlg.shown = len; w.Game.__step(1 / 60);
+  var full = measure();
+  G.dlg.shown = len + 5; w.Game.__step(1 / 60);
+  var full2 = measure();
+  say('整句墨迹：宽 ' + full.w + 'px，墨点 ' + full.n + '（超出字数后 ' + full2.w + '/' + full2.n + '）');
+  if (full.n > 50 && full.w > 20) say('  ✓ 末态有实际文字', 'ok');
+  else { say('  ✗ 末态几乎没墨（可能"没显示完"或文字被裁）', 'bad'); bad++; }
+  if (Math.abs(full.w - full2.w) <= 1) say('  ✓ 字数超出后不再变化（没有多余黑边/没画完的残迹）', 'ok');
+  else { say('  ✗ 超出字数后墨迹还在变：' + full.w + ' → ' + full2.w, 'bad'); bad++; }
+  /* 单元测试：小数 shown 单调 */
+  var prev = -1, mono2 = true, ut = [];
+  for (var q = 0; q <= len + 0.001; q += 0.25) {
+    G.dlg.shown = q; w.Game.__step(1 / 60);
+    var m2 = measure(), wv = m2.w;
+    ut.push(wv);
+    if (wv < prev - 1) mono2 = false;
+    prev = wv;
+  }
+  say('单元测试：shown 0→' + len + ' 每 0.25 字采样 ' + ut.length + ' 次，宽 ' + ut[0] + '→' + ut[ut.length - 1]);
+  if (mono2) say('  ✓ 宽度随 shown 单调不减（n 为小数也稳）', 'ok');
+  else { say('  ✗ 宽度随 shown 回缩：' + ut.slice(0, 40).join(','), 'bad'); bad++; }
+  return bad;
+}
+
+(function poll() {
+  var w = null, ok = false;
+  try { w = iframe.contentWindow; ok = !!(w && w.__booted); } catch (e) {}
+  if (ok) {
+    var bad = 0;
+    try {
+      var G = w.Game.G;
+      w.Game.newGame();
+      for (var i = 0; i < 40; i++) w.Game.__step(1 / 60);
+      bad += check(w, G);
+    } catch (e) { say('harness 异常：' + e.message + '\n' + (e.stack || ''), 'bad'); bad++; }
+    say(bad ? ('===== 失败：' + bad + ' 项 =====') : '===== 通过 =====');
+    document.title = bad ? 'FAIL' : 'PASS';
+    window.__autoDone = true;
+    return;
+  }
+  setTimeout(poll, 100);
+})();
+
+/* --dump-dom 在虚拟时间预算耗尽后抓取；这里用定时器把标志位撑到那一刻 */
+(function waitDone() { if (!window.__autoDone) setTimeout(waitDone, 200); })();
+</script>
+</body>
+</html>

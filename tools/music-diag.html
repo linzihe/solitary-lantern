@@ -1,0 +1,44 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>RESULT=PENDING</title>
+<style>body{background:#0b0a14;color:#cfc8e8;font:12px/1.5 monospace;margin:0;padding:8px}pre{margin:0;white-space:pre-wrap}</style></head>
+<body>
+<pre id="log">pending…</pre>
+<iframe id="f" src="file:///D:/下载/pixel-wicca-v2/index.html" style="width:400px;height:225px;border:1px solid #333"></iframe>
+<script>
+/* 这份不抽样、只记录：每 250ms 记一次 Music.debug() 的变化，直到出结果。
+   结论同时写进 document.title，方便无头下直接读。 */
+var log = document.getElementById('log');
+function say(s) { log.textContent += '\n' + s; }
+var fr = document.getElementById('f'), t0 = Date.now(), last = '', seen = 0;
+(function poll() {
+  var w = null; try { w = fr.contentWindow; } catch (e) {}
+  var d = null;
+  try { if (w && w.__booted && w.Music) d = w.Music.debug(); } catch (e) {}
+  if (d) {
+    var line = 'avail=' + JSON.stringify(d.avail) + ' cur=' + (d.cur ? d.cur.name + '/rs' + d.cur.readyState + '/t' + d.cur.currentTime : 'null') + ' pending=' + d.pending + ' synthVol=' + (w.Sound && w.Sound.getBgmVolume ? w.Sound.getBgmVolume().toFixed(2) : '?') + ' synthCur=' + (w.Sound && w.Sound.currentBgm ? w.Sound.currentBgm() : '-') + ' silenced=' + d.synthSilenced;
+    if (line !== last) { say(((Date.now() - t0) / 1000).toFixed(1) + 's  ' + line); last = line; seen++; }
+    if (d.cur && d.cur.currentTime > 0.3) {
+      document.title = 'RESULT=PLAYING name=' + d.cur.name + ' t=' + d.cur.currentTime;
+      say('===== 成功：' + document.title + ' ====='); window.__autoDone = true; return;
+    }
+    if (seen > 12 && (d.avail === null || d.avail.length === 0)) {
+      document.title = 'RESULT=NO_AVAIL avail=' + JSON.stringify(d.avail);
+      say('===== 失败：探测没找到文件 (' + document.title + ') ====='); window.__autoDone = true; return;
+    }
+    if (d.avail && d.avail.length && d.cur && d.cur.readyState >= 3 && d.cur.currentTime < 0.05 && Date.now() - t0 > 15000) {
+      document.title = 'RESULT=LOADED_BUT_NOT_ADVANCING';
+      say('===== 已加载但时间不走 (' + document.title + ') ====='); window.__autoDone = true; return;
+    }
+  }
+  if (Date.now() - t0 > 35000) {
+    document.title = 'RESULT=TIMEOUT';
+    say('===== 超时（无头环境常见）====='); window.__autoDone = true; return;
+  }
+  setTimeout(poll, 250);
+})();
+(function w2() { if (!window.__autoDone) setTimeout(w2, 400); })();
+</script>
+</body>
+</html>
+

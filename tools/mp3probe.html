@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>mp3probe</title></head>
+<body>
+<pre id="log">mp3probe…</pre>
+<script>
+var log = document.getElementById('log');
+function say(s) { log.textContent += '\n' + s; }
+var src = new URLSearchParams(location.search).get('u') || 'file:///D:/下载/pixel-wicca-v2/music/title.mp3';
+var a = new Audio();
+a.preload = 'auto';
+a.addEventListener('loadedmetadata', function () { say('loadedmetadata: duration=' + a.duration.toFixed(1) + 's'); });
+a.addEventListener('canplay', function () { say('canplay: readyState=' + a.readyState); });
+a.addEventListener('canplaythrough', function () { say('canplaythrough: readyState=' + a.readyState); });
+a.addEventListener('error', function () {
+  var e = a.error;
+  say('error: code=' + (e ? e.code : '?') + ' message=' + (e ? e.message : '?'));
+});
+say('尝试加载：' + src);
+a.src = src;
+a.load();
+var t0 = Date.now();
+var tick = setInterval(function () {
+  say('  t=' + ((Date.now() - t0) / 1000).toFixed(1) + 's readyState=' + a.readyState +
+      ' networkState=' + a.networkState + ' duration=' + (isFinite(a.duration) ? a.duration.toFixed(1) : a.duration) +
+      ' paused=' + a.paused + ' buffered=' + (a.buffered.length ? a.buffered.end(0).toFixed(1) : '0'));
+  if (Date.now() - t0 > 8000) {
+    clearInterval(tick);
+    a.play().then(function () { say('play() resolved, currentTime=' + a.currentTime.toFixed(2)); },
+                  function (e) { say('play() rejected: ' + (e && e.name) + ' ' + (e && e.message)); });
+    setTimeout(function () { say('最终：readyState=' + a.readyState + ' currentTime=' + a.currentTime.toFixed(2) + ' paused=' + a.paused); document.title = 'DONE'; }, 2500);
+  }
+}, 1000);
+(function w() { if (document.title !== 'DONE') setTimeout(w, 300); })();
+</script>
+</body>
+</html>
